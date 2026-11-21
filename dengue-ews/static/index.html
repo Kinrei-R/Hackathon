@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dengue early warning, Bangladesh city wards</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Dengue early warning</h1>
+    <p class="sub">Ward-level risk 2 to 4 weeks ahead, from rainfall, temperature and humidity lags</p>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button role="tab" id="tab-forecast" aria-selected="true" data-view="forecast">Forecast</button>
+    <button role="tab" id="tab-validation" aria-selected="false" data-view="validation">Model validation</button>
+  </nav>
+</header>
+
+<main id="view-forecast" class="layout">
+  <aside class="rail" aria-label="Forecast controls">
+    <section>
+      <h2>Forecast made on</h2>
+      <div class="datebox">
+        <button id="prev" class="step" aria-label="Previous week">&lsaquo;</button>
+        <output id="origin-label" class="origin" aria-live="polite"></output>
+        <button id="next" class="step" aria-label="Next week">&rsaquo;</button>
+      </div>
+      <input id="origin-slider" type="range" min="0" value="0" aria-label="Forecast origin week">
+      <div class="presets" id="presets"></div>
+    </section>
+    <section>
+      <h2>Look ahead</h2>
+      <div class="seg" id="horizon" role="group" aria-label="Lead time in weeks">
+        <button data-h="2">2 weeks</button><button data-h="3" class="on">3 weeks</button><button data-h="4">4 weeks</button>
+      </div>
+      <p class="hint" id="target-note"></p>
+    </section>
+    <section>
+      <h2>City</h2>
+      <select id="city" aria-label="City filter"></select>
+    </section>
+    <section>
+      <h2>Risk tiers</h2>
+      <ul class="legend" id="legend"></ul>
+      <p class="hint">Tier is set by expected cases per ward-week, using cut points learned from the training years.</p>
+    </section>
+  </aside>
+
+  <section class="center">
+    <div class="summary" id="summary" aria-live="polite"></div>
+    <div class="board" id="board" aria-label="Ward risk board"></div>
+    <div class="panel">
+      <h2>Highest-risk wards for this window</h2>
+      <table class="rank" id="rank"></table>
+    </div>
+  </section>
+
+  <aside class="detail" id="detail" aria-live="polite">
+    <p class="empty">Pick a ward on the board to see its forecast, the weather behind it, and the factors driving the score.</p>
+  </aside>
+</main>
+
+<main id="view-validation" class="validation" hidden></main>
+
+<footer class="foot">Trained locally on 2016-2025 weekly ward data. Predictions are decision support, not a diagnosis. <span id="trained"></span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
