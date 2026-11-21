@@ -43,7 +43,7 @@ class Predictor:
         self.thr: list[float] = self.meta["tiers"]["thresholds_cases_per_ward_week"]
         self.origins = sorted(self.panel["date"].unique())
         self.origin_strs = [pd.Timestamp(d).strftime("%Y-%m-%d") for d in self.origins]
-        self._by_date = {pd.Timestamp(d): g.reset_index(drop=True) for d, g in self.panel.groupby("date")} # type: ignore
+        self._by_date = {pd.Timestamp(d): g.reset_index(drop=True) for d, g in self.panel.groupby("date")}
         self._group_idx = {g: [FEATURE_COLS.index(c) for c in cols] for g, cols in FEATURE_GROUPS.items()}
         self._bg_mat = self.bg[FEATURE_COLS].to_numpy(dtype=np.float64)
         self._bg_mean = self.bg.mean()
@@ -74,7 +74,7 @@ class Predictor:
     def _forecast_cached(self, origin_str: str, h: int) -> tuple:
         origin = pd.Timestamp(origin_str)
         fr = self._frame(origin, h)
-        X = fr[FEATURE_COLS]  # DataFrame keeps feature names
+        X = fr[FEATURE_COLS]
         p = np.clip(self.mean.predict(X), 0, None)
         lo = np.minimum(np.clip(self.q10.predict(X), 0, None), p)
         hi = np.maximum(self.q90.predict(X), p)
@@ -106,13 +106,7 @@ class Predictor:
 
     # ---------- driver breakdown ----------
     def _explain(self, row: pd.DataFrame) -> list[dict]:
-        """Exact Shapley values over feature *groups* (interventional, background sample).
-
-        v(S) = mean over background rows b of f(x_S, b_rest). Groups, not single columns,
-        so correlated lag columns share credit instead of masking each other, and 8 groups
-        means only 256 coalitions -> one vectorised predict call of ~10k rows (~50 ms).
-        Contributions sum to f(x) - E[f(background)]; positive pushes expected cases up.
-        """
+        """Exact Shapley values over feature groups, unifying breeding-window rainfall credit."""
         x = row[FEATURE_COLS].to_numpy(dtype=np.float64)[0]
         bg = self._bg_mat[:SHAP_BG]
         n, groups = len(bg), list(self._group_idx)
@@ -132,7 +126,20 @@ class Predictor:
             for gi in range(m):
                 if not mask >> gi & 1:
                     phi[gi] += _SHAP_W[k] * (v[mask | 1 << gi] - v[mask])
-        out = [{"driver": g, "contribution": round(float(p), 3)} for g, p in zip(groups, phi)]
+
+        raw_map = dict(zip(groups, phi))
+        # Merge overlapping breeding-window + cumulative rainfall credit so UI attribution is crystal clear
+        merged = {
+            "Multi-week rainfall (2-4w breeding lag)": raw_map.get("Rainfall 2-4 weeks ago (breeding window)", 0.0)
+            + raw_map.get("Cumulative rainfall", 0.0),
+            "Recent rainfall (0-1 weeks ago)": raw_map.get("Rainfall 0-1 weeks ago", 0.0),
+            "Earlier rainfall (5-8 weeks ago)": raw_map.get("Rainfall 5-8 weeks ago", 0.0),
+            "Temperature": raw_map.get("Temperature", 0.0),
+            "Humidity": raw_map.get("Humidity", 0.0),
+            "Ward vulnerability": raw_map.get("Ward vulnerability", 0.0),
+            "Seasonality & lead time": raw_map.get("Time of year and lead time", 0.0),
+        }
+        out = [{"driver": g, "contribution": round(float(val), 3)} for g, val in merged.items()]
         return sorted(out, key=lambda d: -abs(d["contribution"]))
 
     def _explain_cached(self, ward_id: str, origin: str, h: int, row: pd.DataFrame) -> list[dict]:
@@ -157,6 +164,70 @@ class Predictor:
             {"label": "Sanitation score", "value": round(float(r.sanitation_score), 2), "typical": round(float(b.sanitation_score), 2), "unit": ""},
         ]
 
+    # ---------- what-if custom weather simulator ----------
+    def simulate_ward(
+        self,
+        ward_id: str,
+        origin: str | None,
+        h: int,
+        rainfall_mm: float,
+        avg_temp_c: float,
+        humidity_pct: float,
+    ) -> dict:
+        """Simulate custom multi-week weather inputs for a ward and recompute risk + Shapley drivers."""
+        if ward_id not in self.wards.index:
+            raise KeyError(ward_id)
+        o = self.snap_origin(origin)
+        fr = self._frame(o, int(h))
+        row = fr[fr.ward_id == ward_id].copy().reset_index(drop=True)
+
+        # Apply simulated weekly rainfall across recent + breeding lag window (lags 0..4)
+        r_val = float(np.clip(rainfall_mm, 0.0, 350.0))
+        t_val = float(np.clip(avg_temp_c, 12.0, 42.0))
+        h_val = float(np.clip(humidity_pct, 30.0, 100.0))
+
+        for k in range(5):
+            row[f"rain_lag_{k}"] = np.float32(r_val)
+        row["rain_sum_2w"] = np.float32(r_val * 2.0)
+        row["rain_sum_4w"] = np.float32(r_val * 4.0)
+        older_rain = sum(float(row[f"rain_lag_{k}"].iloc[0]) for k in range(5, 9))
+        row["rain_sum_8w"] = np.float32(r_val * 5.0 + older_rain)
+        row["rain_max_4w"] = np.float32(max(r_val, float(row["rain_max_4w"].iloc[0]) if r_val == 0 else r_val))
+        older_wet = sum(1.0 for k in range(5, 9) if float(row[f"rain_lag_{k}"].iloc[0]) > 50.0)
+        row["rain_wet_weeks_8w"] = np.float32((5.0 if r_val > 50.0 else 0.0) + older_wet)
+
+        for k in (0, 2, 4):
+            row[f"temp_lag_{k}"] = np.float32(t_val)
+            row[f"hum_lag_{k}"] = np.float32(h_val)
+        temp_delta = t_val - float(row["temp_mean_4w"].iloc[0])
+        row["temp_mean_4w"] = np.float32(t_val)
+        row["tmin_mean_4w"] = np.float32(float(row["tmin_mean_4w"].iloc[0]) + temp_delta)
+        row["hum_mean_4w"] = np.float32(h_val)
+
+        X = row[FEATURE_COLS]
+        p = float(np.clip(self.mean.predict(X)[0], 0, None))
+        lo = float(min(np.clip(self.q10.predict(X)[0], 0, None), p))
+        hi = float(max(self.q90.predict(X)[0], p))
+        tier = self.tier(p)
+        worst_tier = self.tier(hi)
+        drivers = self._explain(row)
+        facts = self._facts(row)
+        return {
+            "ward_id": ward_id,
+            "origin": o.strftime("%Y-%m-%d"),
+            "target_date": row["target_date"].iloc[0].strftime("%Y-%m-%d"),
+            "horizon_weeks": int(h),
+            "inputs": {"rainfall_mm": r_val, "avg_temp_c": t_val, "humidity_pct": h_val},
+            "predicted_cases": round(p, 2),
+            "low": round(lo, 2),
+            "high": round(hi, 2),
+            "tier": tier,
+            "worst_case_tier": worst_tier,
+            "risk_score": round(self.score(p), 1),
+            "drivers": drivers,
+            "facts": facts,
+        }
+
     def ward_detail(self, ward_id: str, origin: str | None, h: int) -> dict:
         if ward_id not in self.wards.index:
             raise KeyError(ward_id)
@@ -178,10 +249,17 @@ class Predictor:
                            (self.panel.date <= o + pd.Timedelta(weeks=4))]
         realised = [{"date": d.strftime("%Y-%m-%d"), "cases": float(c)} for d, c in zip(later.date, later.cases_lag_0)]
         w = self.wards.loc[ward_id]
+        r0 = row.iloc[0]
+        default_weather = {
+            "rainfall_mm": round(float(r0.rain_sum_4w) / 4.0, 1),
+            "avg_temp_c": round(float(r0.temp_mean_4w), 1),
+            "humidity_pct": round(float(r0.hum_mean_4w), 1),
+        }
         return {"ward_id": ward_id, "city": w.city, "origin": o.strftime("%Y-%m-%d"), "horizon_weeks": int(h),
-                "static": {"population_density_sqkm": int(w.population_density_sqkm), # type: ignore
-                           "water_logging_risk_index": float(w.water_logging_risk_index), # type: ignore
-                           "sanitation_score": float(w.sanitation_score)}, # type: ignore
+                "static": {"population_density_sqkm": int(w.population_density_sqkm),
+                           "water_logging_risk_index": float(w.water_logging_risk_index),
+                           "sanitation_score": float(w.sanitation_score)},
+                "default_weather": default_weather,
                 "horizons": horizons, "drivers": self._explain_cached(ward_id, o.strftime("%Y-%m-%d"), int(h), row), "facts": self._facts(row),
                 "history": history, "realised_after_origin": realised}
 
@@ -189,7 +267,9 @@ class Predictor:
     def bootstrap(self) -> dict:
         m = self.meta
         wards = [{"ward_id": k, "city": v.city} for k, v in self.wards.iterrows()]
+        default_origin = "2025-08-04" if "2025-08-04" in self.origin_strs else self.origin_strs[-1]
         return {"origins": self.origin_strs, "latest_origin": self.origin_strs[-1],
+                "default_origin": default_origin,
                 "cities": ["All cities"] + sorted(self.wards.city.unique()), "wards": wards,
                 "horizons": m["horizons"], "tiers": {"names": TIERS, "thresholds": self.thr},
                 "data_range": m["data_range"], "trained_at": m["trained_at"]}
