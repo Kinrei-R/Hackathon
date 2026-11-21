@@ -20,4 +20,10 @@
             v
  src/train.py  chronological split by TARGET date
    train <= 2022 | validation 2023 | test 2024-2025
-
+            |
+            +--> HistGradientBoosting (Poisson)   -> dengue_model.joblib   (expected cases)
+            +--> HistGradientBoosting (quantile)  -> dengue_q10 / q90.joblib (80% range)
+            +--> tier cut points from training cases -> model_metadata.json
+            +--> feature_store.joblib (all ward-week features) + metrics
+            |
+            v
