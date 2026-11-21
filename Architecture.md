@@ -71,3 +71,8 @@ and that no target column is a feature.
   0.53 for same-week rain (shown in the validation tab).
   - **Risk tiers** use cut points at the 65th, 85th and 96th percentile of training cases
   (1, 8, 14 cases per ward-week), so tiers reflect how rare each level is.
+  - **Driver breakdown:** exact Shapley values over 8 groups of features (e.g. "Rainfall 2-4 weeks ago",
+  "Ward vulnerability"). Groups, not single columns, so correlated lag columns share credit rather than
+  masking each other. Contributions sum to prediction minus the average-ward-week baseline. Note
+  that cumulative-rainfall features overlap the individual lag groups, so credit for rainfall is split
+  between them; read the rainfall groups together.
