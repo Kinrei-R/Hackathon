@@ -11,7 +11,7 @@ EDU AI Engineering Hackathon 2026, Phase 1 (preliminary round).
 Needs Python 3.10+
 
 ```bash
-git clone <your-repo-url> dengue-ews && cd dengue-ews
+git clone <https://github.com/Kinrei-R/Hackathon> dengue-ews && cd dengue-ews
 python -m venv .venv && source .venv/bin/ activate  #Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python app.py
