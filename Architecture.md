@@ -27,3 +27,14 @@
             +--> feature_store.joblib (all ward-week features) + metrics
             |
             v
+ src/inference.py   Predictor (loaded once at startup)
+   forecast(origin, h): 3 vectorised predict() calls on 60 rows, memoised
+   ward_detail(): exact Shapley over 8 feature groups, memoised
+            |
+            v
+ app.py (FastAPI) -> /api/* JSON -> static/ dashboard (vanilla JS + inline SVG)
+```
+
+A forecast is "made" at an origin week t using only data up to t, and describes week t + h for
+h = 2, 3, 4. Origins range over the whole history, so a past origin can be compared with what
+actually happened, and the latest origin (2025-12-29) gives true future forecasts.
