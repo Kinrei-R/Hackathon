@@ -77,3 +77,12 @@ ARCHITECTURE.md         data flow, validation split, model rationale, cost contr
 ## AI assistants and external APIs used
 
 > Teams: keep this list accurate and complete before submitting.
+
+- **Claude (Anthropic)**: generated the initial code, tests and documentation for this repository from
+ the hackathon brief; reviewed and edited by the team.
+ - No external APIs, LLM calls or hosted services are used at training or at runtime.
+
+## Team and Git history
+
+Commit regularly from every team member's own account throughout the 24 hours. The scoring rubric
+penalises a single bulk commit at the deadline.
