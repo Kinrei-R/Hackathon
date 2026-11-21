@@ -63,3 +63,17 @@ models/                 serialized models, feature store, model_metadata.json
 data/                   hackathon_preli_dataset.xlsx
 tests/                  lag correctness and leakage checks
 ARCHITECTURE.md         data flow, validation split, model rationale, cost controls
+```
+
+## API
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/bootstrap` | origins, cities, wards, tier cut points |
+| `GET /api/forecast?origin=2025-08-04&horizon=3&city=` | every ward's tier, expected cases, 80% range |
+| `GET /api/ward/{ward_id}?origin=&horizon=` | fan for 2/3/4 weeks, drivers, key readings, history |
+| `GET /api/validation` | hold-out metrics, baselines, confusion matrices, lag evidence |
+
+## AI assistants and external APIs used
+
+> Teams: keep this list accurate and complete before submitting.
