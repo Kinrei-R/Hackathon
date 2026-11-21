@@ -1,5 +1,5 @@
 {
-  "trained_at": "2026-11-21T21:08:04",
+  "trained_at": "2026-11-21T21:21:47",
   "feature_cols": [
     "rain_lag_0",
     "rain_lag_1",
