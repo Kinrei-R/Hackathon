@@ -43,7 +43,7 @@ class Predictor:
         self.thr: list[float] = self.meta["tiers"]["thresholds_cases_per_ward_week"]
         self.origins = sorted(self.panel["date"].unique())
         self.origin_strs = [pd.Timestamp(d).strftime("%Y-%m-%d") for d in self.origins]
-        self._by_date = {pd.Timestamp(d): g.reset_index(drop=True) for d, g in self.panel.groupby("date")}
+        self._by_date = {pd.Timestamp(d): g.reset_index(drop=True) for d, g in self.panel.groupby("date")} # type: ignore
         self._group_idx = {g: [FEATURE_COLS.index(c) for c in cols] for g, cols in FEATURE_GROUPS.items()}
         self._bg_mat = self.bg[FEATURE_COLS].to_numpy(dtype=np.float64)
         self._bg_mean = self.bg.mean()
@@ -179,9 +179,9 @@ class Predictor:
         realised = [{"date": d.strftime("%Y-%m-%d"), "cases": float(c)} for d, c in zip(later.date, later.cases_lag_0)]
         w = self.wards.loc[ward_id]
         return {"ward_id": ward_id, "city": w.city, "origin": o.strftime("%Y-%m-%d"), "horizon_weeks": int(h),
-                "static": {"population_density_sqkm": int(w.population_density_sqkm),
-                           "water_logging_risk_index": float(w.water_logging_risk_index),
-                           "sanitation_score": float(w.sanitation_score)},
+                "static": {"population_density_sqkm": int(w.population_density_sqkm), # type: ignore
+                           "water_logging_risk_index": float(w.water_logging_risk_index), # type: ignore
+                           "sanitation_score": float(w.sanitation_score)}, # type: ignore
                 "horizons": horizons, "drivers": self._explain_cached(ward_id, o.strftime("%Y-%m-%d"), int(h), row), "facts": self._facts(row),
                 "history": history, "realised_after_origin": realised}
 
