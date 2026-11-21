@@ -3,7 +3,7 @@ const TIERS = ["Low", "Medium", "High", "Critical"];
 const COLORS = { Low: "#8fbaa9", Medium: "#ecc94b", High: "#e07a3c", Critical: "#a1233a" };
 const $ = (s) => document.querySelector(s);
 const state = { boot: null, idx: 0, h: 3, city: "All cities", ward: null, view: "forecast", val: null };
-const cache = new Map(); // client-side response cache: one network call per unique query
+const cache = new Map();
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const fmt = (n, d = 1) => Number(n).toFixed(d);
@@ -27,15 +27,31 @@ const origin = () => state.boot.origins[state.idx];
 function setupControls() {
   const b = state.boot, sl = $("#origin-slider");
   sl.max = b.origins.length - 1;
-  state.idx = b.origins.length - 1;
+  const startDate = b.default_origin || b.latest_origin;
+  const startIdx = b.origins.indexOf(startDate);
+  state.idx = startIdx >= 0 ? startIdx : b.origins.length - 1;
   sl.value = state.idx;
+
   let timer;
-  sl.addEventListener("input", () => { state.idx = +sl.value; $("#origin-label").textContent = longDate(origin()); clearTimeout(timer); timer = setTimeout(refresh, 120); });
+  sl.addEventListener("input", () => {
+    state.idx = +sl.value;
+    $("#origin-label").textContent = longDate(origin());
+    clearTimeout(timer);
+    timer = setTimeout(refresh, 120);
+  });
   $("#prev").onclick = () => move(-1);
   $("#next").onclick = () => move(1);
-  const presets = [["Latest week", b.latest_origin], ["Monsoon onset 2025", "2025-06-02"], ["Peak 2025", "2025-08-04"], ["Peak 2024", "2024-08-05"], ["Dry season 2025", "2025-02-03"]];
+
+  const presets = [
+    ["Peak 2025", "2025-08-04"],
+    ["Monsoon onset 2025", "2025-06-02"],
+    ["Peak 2024", "2024-08-05"],
+    ["Dry season 2025", "2025-02-03"],
+    ["Latest week", b.latest_origin],
+  ];
   $("#presets").innerHTML = presets.map(([l, d]) => `<button data-d="${d}">${l}</button>`).join("");
   $("#presets").onclick = (e) => { const d = e.target.dataset.d; if (d) goTo(d); };
+
   $("#horizon").onclick = (e) => {
     const h = e.target.dataset.h; if (!h) return;
     state.h = +h;
@@ -51,6 +67,7 @@ function setupControls() {
   document.querySelectorAll(".tabs button").forEach((t) => (t.onclick = () => switchView(t.dataset.view)));
   $("#trained").textContent = "Model trained " + b.trained_at.slice(0, 10) + ".";
 }
+
 function move(d) { state.idx = Math.min(Math.max(state.idx + d, 0), state.boot.origins.length - 1); $("#origin-slider").value = state.idx; refresh(); }
 function goTo(d) {
   const o = state.boot.origins; let i = o.length - 1;
@@ -105,27 +122,83 @@ function renderBoard(fc) {
 
 function selectWard(id) { state.ward = id; document.querySelectorAll(".tile").forEach((t) => t.setAttribute("aria-pressed", t.dataset.w === id)); loadWard(id); }
 
+function renderDriversAndFacts(drivers, facts) {
+  const maxAbs = Math.max(...drivers.map((x) => Math.abs(x.contribution)), 0.01);
+  return (
+    `<h4>What is driving this score (cases per week vs. an average ward-week)</h4>` +
+    drivers.map((x) => {
+      const w = Math.abs(x.contribution) / maxAbs * 50, pos = x.contribution >= 0;
+      return `<div class="drv"><span>${esc(x.driver)}</span><div class="track"><div class="fill" style="left:${pos ? 50 : 50 - w}%;width:${w}%;background:${pos ? "var(--pos)" : "var(--neg)"}"></div></div><span class="v">${pos ? "+" : ""}${fmt(x.contribution, 1)}</span></div>`;
+    }).join("") +
+    `<p class="hint">Orange raises expected cases, blue lowers them. Values are exact Shapley contributions of each factor group.</p>` +
+    `<h4>Key readings</h4><table class="facts">${facts.map((x) => `<tr><td>${esc(x.label)}</td><td class="num">${x.value} ${x.unit}</td><td class="num">typical ${x.typical}</td></tr>`).join("")}</table>`
+  );
+}
+
 async function loadWard(id) {
   let d;
   try { d = await api(`/api/ward/${id}?origin=${origin()}&horizon=${state.h}`); }
   catch (e) { $("#detail").innerHTML = `<p class="empty">Could not load ${esc(id)}.</p>`; return; }
   if (state.ward !== id) return;
   const f = d.horizons[state.h];
+  const dw = d.default_weather || { rainfall_mm: 40, avg_temp_c: 28, humidity_pct: 75 };
   const sentence = `About ${fmt(f.predicted_cases, 0)} cases expected in the week of ${longDate(f.target_date)} (80% range ${fmt(f.low, 0)} to ${fmt(f.high, 0)}).` +
     (f.worst_case_tier !== f.tier ? ` The upper end would be ${f.worst_case_tier}.` : "");
-  const maxAbs = Math.max(...d.drivers.map((x) => Math.abs(x.contribution)), 0.01);
+
   $("#detail").innerHTML =
     `<h3>${esc(shortWard(d.ward_id))}, ${esc(d.city)}</h3>` +
-    `<p class="headline"><span class="chip t-${f.tier}">${f.tier}</span> ${sentence}</p>` +
+    `<p class="headline" id="ward-headline"><span class="chip t-${f.tier}">${f.tier}</span> ${sentence}</p>` +
     `<div class="fan">${[2, 3, 4].map((h) => { const x = d.horizons[h]; return `<button data-h="${h}" aria-pressed="${h === state.h}"><small>${h} weeks ahead</small><b>${fmt(x.predicted_cases, 0)}</b> <span class="chip t-${x.tier}">${x.tier}</span></button>`; }).join("")}</div>` +
+    `<div style="margin:12px 0;padding:12px;border:1px solid #d5e0e3;border-radius:10px;background:#f8fbfc">` +
+      `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">` +
+        `<strong style="font-size:13px">What-If Weather Simulator (Breeding Lag Input)</strong>` +
+        `<button type="button" id="sim-reset" style="font-size:11px;padding:3px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer">Reset</button>` +
+      `</div>` +
+      `<label style="display:block;font-size:12px;margin-bottom:6px">Weekly Rainfall (0&ndash;4w window): <b id="sim-r-val">${dw.rainfall_mm}</b> mm` +
+        `<input type="range" id="sim-r" min="0" max="260" step="5" value="${dw.rainfall_mm}" style="width:100%"></label>` +
+      `<label style="display:block;font-size:12px;margin-bottom:6px">Avg Temperature: <b id="sim-t-val">${dw.avg_temp_c}</b> &deg;C` +
+        `<input type="range" id="sim-t" min="16" max="38" step="0.5" value="${dw.avg_temp_c}" style="width:100%"></label>` +
+      `<label style="display:block;font-size:12px">Relative Humidity: <b id="sim-h-val">${dw.humidity_pct}</b> %` +
+        `<input type="range" id="sim-h" min="40" max="99" step="1" value="${dw.humidity_pct}" style="width:100%"></label>` +
+    `</div>` +
     `<h4>Cases and the rainfall behind them</h4>${timeline(d)}` +
     `<div class="key"><span>&#9644; reported cases</span><span>&#9679; forecast with 80% range</span><span>&#9670; what happened next</span><span>shaded: last 5 weeks of rain, the model's closest lags</span></div>` +
-    `<h4>What is driving this score (cases per week vs. an average ward-week)</h4>` +
-    d.drivers.map((x) => { const w = Math.abs(x.contribution) / maxAbs * 50, pos = x.contribution >= 0;
-      return `<div class="drv"><span>${esc(x.driver)}</span><div class="track"><div class="fill" style="left:${pos ? 50 : 50 - w}%;width:${w}%;background:${pos ? "var(--pos)" : "var(--neg)"}"></div></div><span class="v">${pos ? "+" : ""}${fmt(x.contribution, 1)}</span></div>`; }).join("") +
-    `<p class="hint">Orange raises expected cases, blue lowers them. Values are exact Shapley contributions of each factor group.</p>` +
-    `<h4>Key readings</h4><table class="facts">${d.facts.map((x) => `<tr><td>${esc(x.label)}</td><td class="num">${x.value} ${x.unit}</td><td class="num">typical ${x.typical}</td></tr>`).join("")}</table>`;
-  $("#detail").querySelector(".fan").onclick = (e) => { const b = e.target.closest("[data-h]"); if (!b) return; state.h = +b.dataset.h; document.querySelectorAll("#horizon button").forEach((x) => x.classList.toggle("on", x.dataset.h === String(state.h))); refresh(); };
+    `<div id="ward-dynamic">${renderDriversAndFacts(d.drivers, d.facts)}</div>`;
+
+  $("#detail").querySelector(".fan").onclick = (e) => {
+    const b = e.target.closest("[data-h]"); if (!b) return;
+    state.h = +b.dataset.h;
+    document.querySelectorAll("#horizon button").forEach((x) => x.classList.toggle("on", x.dataset.h === String(state.h)));
+    refresh();
+  };
+
+  let simTimer;
+  const runSim = () => {
+    const rVal = +$("#sim-r").value, tVal = +$("#sim-t").value, hVal = +$("#sim-h").value;
+    $("#sim-r-val").textContent = rVal;
+    $("#sim-t-val").textContent = tVal;
+    $("#sim-h-val").textContent = hVal;
+    clearTimeout(simTimer);
+    simTimer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/simulate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ward_id: d.ward_id, origin: origin(), horizon: state.h, rainfall_mm: rVal, avg_temp_c: tVal, humidity_pct: hVal }),
+        });
+        if (!res.ok) return;
+        const sim = await res.json();
+        const simSentence = `<b>[Simulated]</b> About ${fmt(sim.predicted_cases, 1)} cases expected in the week of ${longDate(sim.target_date)} (80% range ${fmt(sim.low, 0)} to ${fmt(sim.high, 0)}).` +
+          (sim.worst_case_tier !== sim.tier ? ` Upper bound: ${sim.worst_case_tier}.` : "");
+        $("#ward-headline").innerHTML = `<span class="chip t-${sim.tier}">${sim.tier}</span> ${simSentence}`;
+        $("#ward-dynamic").innerHTML = renderDriversAndFacts(sim.drivers, sim.facts);
+      } catch (_) {}
+    }, 140);
+  };
+  $("#sim-r").oninput = runSim;
+  $("#sim-t").oninput = runSim;
+  $("#sim-h").oninput = runSim;
+  $("#sim-reset").onclick = () => loadWard(d.ward_id);
 }
 
 /* ---------- ward timeline chart (inline SVG) ---------- */
@@ -149,7 +222,6 @@ function timeline(d) {
     s += `<circle cx="${cx}" cy="${y(p.predicted_cases)}" r="${sel ? 6 : 4.5}" fill="${COLORS[p.tier]}" stroke="#17262b" stroke-width="${sel ? 2 : 1}"/>`;
   });
   d.realised_after_origin.forEach((p) => { const cx = x(p.date), cy = y(p.cases); s += `<path d="M${cx} ${cy - 5}l5 5l-5 5l-5 -5z" fill="#fff" stroke="#17262b" stroke-width="1.5"/>`; });
-  // rainfall panel
   const top = H1 + gap, ry = (v) => top + H2 - (v / rMax) * H2;
   const wx0 = x(iso(addDays(d.origin, -4 * 7))) - bw / 2 - 1, wx1 = x(d.origin) + bw / 2 + 1;
   s += `<rect x="${wx0}" y="${top}" width="${wx1 - wx0}" height="${H2}" fill="#dcebf1"/>`;
@@ -177,7 +249,7 @@ async function renderValidation() {
     `<h2 style="margin-top:14px">Accuracy by lead time</h2><table><tr><th>Lead time</th><th class="num">MAE</th><th class="num">RMSE</th><th class="num">Tier correct</th><th class="num">Coverage</th></tr>${Object.entries(m.by_horizon).map(([h, r]) => `<tr><td>${h} weeks</td><td class="num">${fmt(r.mae, 2)}</td><td class="num">${fmt(r.rmse, 2)}</td><td class="num">${pct(r.tier_accuracy)}</td><td class="num">${pct(r.interval_80_coverage)}</td></tr>`).join("")}</table>` +
     `<p class="note">The range is wider than 80% in practice (${pct(o.interval_80_coverage)} covered): weekly counts are zero-inflated, so the 10th and 90th percentile models are cautious. Treat it as a conservative range.</p></div>` +
     `<div class="card"><h2>Why lags matter: cases vs. rainfall k weeks earlier (correlation)</h2><div id="lagchart"></div><p class="note">Correlation peaks about three weeks after rain, matching mosquito breeding plus incubation time. Same-week rain is a much weaker signal.</p></div></div>` +
-    `<div class="card"><h2>Predicted vs. actual cases over the test period</h2><div class="controls"><select id="vcity">${Object.keys(m.series["3"]).map((c) => `<option>${esc(c)}</option>`).join("")}</select><select id="vh">${[2, 3, 4].map((h) => `<option value="${h}" ${h === 3 ? "selected" : ""}>${h} weeks ahead</option>`).join("")}</select></div><div id="vchart"></div><p class="note">Weekly totals across the selected wards, each forecast made ${"2 to 4"} weeks before its target week.</p></div>` +
+    `<div class="card"><h2>Predicted vs. actual cases over the test period</h2><div class="controls"><select id="vcity">${Object.keys(m.series["3"]).map((c) => `<option>${esc(c)}</option>`).join("")}</select><select id="vh">${[2, 3, 4].map((h) => `<option value="${h}" ${h === 3 ? "selected" : ""}>${h} weeks ahead</option>`).join("")}</select></div><div id="vchart"></div><p class="note">Weekly totals across the selected wards, each forecast made 2 to 4 weeks before its target week.</p></div>` +
     `<div class="card"><h2>Risk tier confusion matrix</h2><div class="controls"><select id="cmh">${[2, 3, 4].map((h) => `<option value="${h}" ${h === 3 ? "selected" : ""}>${h} weeks ahead</option>`).join("")}</select></div><div id="cm"></div><p class="note">Rows are the tier that actually occurred, columns the tier predicted. Most errors are one tier off.</p></div>`;
   drawLag(v.lag_correlations);
   const draw = () => drawSeries(m.series[$("#vh").value][$("#vcity").value]);

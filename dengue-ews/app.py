@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from src.inference import Predictor, models_ready
 
@@ -21,16 +22,25 @@ ROOT = Path(__file__).resolve().parent
 STATE: dict[str, Predictor] = {}
 
 
+class SimulationRequest(BaseModel):
+    ward_id: str
+    origin: str | None = None
+    horizon: int = Field(3, ge=2, le=4)
+    rainfall_mm: float = Field(..., ge=0, le=350)
+    avg_temp_c: float = Field(..., ge=12, le=42)
+    humidity_pct: float = Field(..., ge=30, le=100)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if not models_ready():  # fresh clone without model files: train once (~20 s)
+    if not models_ready():
         print("Model artifacts not found - training once (about 20 seconds)...")
         from src.train import main as train
 
         train()
     try:
         STATE["p"] = Predictor()
-    except Exception as exc:  # e.g. model pickled with a different scikit-learn version
+    except Exception as exc:
         print(f"Could not load saved models ({exc.__class__.__name__}); retraining once...")
         from src.train import main as train
 
@@ -88,6 +98,22 @@ def ward(ward_id: str, origin: str | None = None, horizon: int = Query(3, ge=2, 
         return _cached(STATE["p"].ward_detail(ward_id, _check_origin(origin), horizon), 600)
     except KeyError:
         raise HTTPException(404, f"Unknown ward_id {ward_id}")
+
+
+@app.post("/api/simulate")
+def simulate(req: SimulationRequest):
+    """Run live what-if weather scenario inference for a selected ward."""
+    try:
+        return STATE["p"].simulate_ward(
+            req.ward_id,
+            _check_origin(req.origin),
+            req.horizon,
+            req.rainfall_mm,
+            req.avg_temp_c,
+            req.humidity_pct,
+        )
+    except KeyError:
+        raise HTTPException(404, f"Unknown ward_id {req.ward_id}")
 
 
 @app.get("/api/validation")
