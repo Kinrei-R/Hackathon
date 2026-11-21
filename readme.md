@@ -46,3 +46,20 @@ week (2025-12-29) forecasts are genuine future predictions with no outcome yet.
 | **This model** | **1.10** | **2.16** |
 | Ward seasonal average | 1.26 | 2.45 |
 | Last week's cases carried forward | 1.86 | 3.58 |
+
+R-squared 0.72, tier correct 79%, within one tier 99%, High-or-Critical recall 67% / precision 58%.
+The "80%" range covers 95% of outcomes, so it is conservative. Full numbers in
+`models/model_metadata.json` and the validation tab.
+
+## Repository layout
+
+```
+app.py                  FastAPI server (API + serves the dashboard)
+src/features.py         per-ward multi-week lag pipeline
+src/train.py            chronological split, Poisson + quantile models, metrics export
+src/inference.py        cached inference, risk tiers, Shapley driver breakdown
+static/                 index.html, style.css, app.js (vanilla JS, inline SVG charts)
+models/                 serialized models, feature store, model_metadata.json
+data/                   hackathon_preli_dataset.xlsx
+tests/                  lag correctness and leakage checks
+ARCHITECTURE.md         data flow, validation split, model rationale, cost controls
