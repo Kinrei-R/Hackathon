@@ -94,3 +94,6 @@ and that no target column is a feature.
 
 - Weather inputs are the weekly values in the dataset. The onsite system would ingest a real forecast
   feed; because the feature pipeline is per-ward and incremental, only the loader changes.
+  - Ward geometry is not in the dataset, so the heatmap is a ward grid grouped by city rather than a map.
+- Risk is calibrated to this dataset's case scale; thresholds should be re-derived for real surveillance data.
+- Tier boundaries cause most errors (99% of predictions are within one tier).
