@@ -19,24 +19,24 @@
   /* text */
   --ink: #0f172a;
   --ink-2: #334155;
-  --muted: #64748b;
+  --muted: #64748bfb;
   /* brand */
   --brand: #059669;
-  --brand-bright: #10b981;
+  --brand-bright: #10b981e7;
   --brand-tint: #ecfdf5;
-  --brand-ink: #065f46;
+  --brand-ink: #065f46ee;
   /* island nav */
   --island: rgba(18, 22, 31, 0.88);
   --island-blur: blur(14px);
   --island-text: #e2e8f0;
   /* semantic risk (JS tier names: Low, Medium, High, Critical) */
-  --risk-low: #10b981;
+  --risk-low: #10b981ea;
   --risk-moderate: #f59e0b;
   --risk-high: #f97316;
-  --risk-critical: #ef4444;
+  --risk-critical: #ef4444da;
   /* drivers */
-  --driver-up: #ea580c;
-  --driver-down: #0891b2;
+  --driver-up: #ea5a0cd8;
+  --driver-down: #0890b2ef;
   --pos: var(--driver-up);   /* referenced by app.js driver bars */
   --neg: var(--driver-down); /* referenced by app.js driver bars */
   --chart-rain: #0ea5e9;
