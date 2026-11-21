@@ -76,7 +76,7 @@ and that no target column is a feature.
   masking each other. Contributions sum to prediction minus the average-ward-week baseline. Note
   that cumulative-rainfall features overlap the individual lag groups, so credit for rainfall is split
   between them; read the rainfall groups together.
-  
+
 ## 4. Compute and API cost controls
 
 | Control | Where |
@@ -85,3 +85,12 @@ and that no target column is a feature.
 | Feature store precomputed: no Excel parsing or lag recomputation per request | `models/feature_store.joblib` |
 | Whole 60-ward forecast = 3 vectorised `predict` calls (~30 ms), memoised with `lru_cache` per (origin, horizon) | `_forecast_cached` |
 | Shapley attribution: 256 coalitions x 40 background rows in a single `predict` (~0.15 s cold), cached per (ward, origin, horizon) | `_explain_cached` |
+| Browser caches every API response in a `Map`; slider input is debounced 120 ms; the board loads all wards in one call and filters by city client-side | `static/app.js` |
+| HTTP `Cache-Control` on API responses, gzip on the server | `app.py` |
+| No LLM calls, no external APIs, no CDN assets at runtime: **API and token cost is zero** | whole system |
+| Retraining is optional and takes about 20 s on one CPU | `python -m src.train` |
+
+## 5. Limitations and next steps
+
+- Weather inputs are the weekly values in the dataset. The onsite system would ingest a real forecast
+  feed; because the feature pipeline is per-ward and incremental, only the loader changes.
