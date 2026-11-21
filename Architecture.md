@@ -11,4 +11,30 @@
    rainfall lags 0-8 wk, rolling sum 2/4/8 wk, max 4 wk, wet-week count
    temperature + humidity lags 0/2/4 wk and 4-wk means
    static: population density, water-logging index, sanitation score
-   targets y_h2, y_h3, y_h4 = cases 2/3/4 weeks AFTER the origin week
+   targets y_h2, y_h3, y_h4 = cases 2/3/4 weeks AFTER the origin week            
+            |
+            v
+ stack_horizons(): one row per (ward, origin week, lead time h)
+   + target-week seasonality (sin/cos of week of year) + h as a feature
+            |
+            v
+ src/train.py  chronological split by TARGET date
+   train <= 2022 | validation 2023 | test 2024-2025
+            |
+            +--> HistGradientBoosting (Poisson)   -> dengue_model.joblib   (expected cases)
+            +--> HistGradientBoosting (quantile)  -> dengue_q10 / q90.joblib (80% range)
+            +--> tier cut points from training cases -> model_metadata.json
+            +--> feature_store.joblib (all ward-week features) + metrics
+            |
+            v
+ src/inference.py   Predictor (loaded once at startup)
+   forecast(origin, h): 3 vectorised predict() calls on 60 rows, memoised
+   ward_detail(): exact Shapley over 8 feature groups, memoised
+            |
+            v
+ app.py (FastAPI) -> /api/* JSON -> static/ dashboard (vanilla JS + inline SVG)
+```
+
+A forecast is "made" at an origin week t using only data up to t, and describes week t + h for
+h = 2, 3, 4. Origins range over the whole history, so a past origin can be compared with what
+actually happened, and the latest origin (2025-12-29) gives true future forecasts.
