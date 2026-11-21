@@ -69,3 +69,5 @@ and that no target column is a feature.
   model 1.10.
 - **Lag evidence.** Correlation of cases with rainfall k weeks earlier peaks at k = 3 (0.75) against
   0.53 for same-week rain (shown in the validation tab).
+  - **Risk tiers** use cut points at the 65th, 85th and 96th percentile of training cases
+  (1, 8, 14 cases per ward-week), so tiers reflect how rare each level is.
