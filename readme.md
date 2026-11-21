@@ -21,3 +21,15 @@ Open **http://127.0.0.1:8000**.
 
 The trained models are committed in `models/`, so there is no training step. If they are missing,
 or were saved with a different scikit-learn version,`app.py` retrains once on startup (about 20 s).
+To retrain by hand: `python -m src.train`. To run the lag/leakage tests: `python -m tests.test_pipeline`.
+
+No API keys, no paid services, no network calls at runtime. The front end has no CDN dependencies.
+
+## What you can do in the dashboard
+
+- Choose the **week the forecast is made** (slider, arrows or presets such as *Peak 2025*) and a
+**lead time of 2, 3 or 4 weeks**; filter by city.
+- See all 60 wards as a **risk heatmap board** (colour = tier, number = expected cases), plus a ranked
+list of the highest-risk wards with an 80% range and the tier they *could* reach.
+- Click a ward to see its forecast fan for 2, 3 and 4 weeks, recent cases and rainfall, **driver
+  breakdown** (exact Shapley contributions per factor group), and key weather readings vs. typical. 
