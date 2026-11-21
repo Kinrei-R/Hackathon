@@ -76,3 +76,12 @@ and that no target column is a feature.
   masking each other. Contributions sum to prediction minus the average-ward-week baseline. Note
   that cumulative-rainfall features overlap the individual lag groups, so credit for rainfall is split
   between them; read the rainfall groups together.
+  
+## 4. Compute and API cost controls
+
+| Control | Where |
+|---|---|
+| Models trained once, serialized with joblib, loaded once at server start (~1 s) | `inference.Predictor` |
+| Feature store precomputed: no Excel parsing or lag recomputation per request | `models/feature_store.joblib` |
+| Whole 60-ward forecast = 3 vectorised `predict` calls (~30 ms), memoised with `lru_cache` per (origin, horizon) | `_forecast_cached` |
+| Shapley attribution: 256 coalitions x 40 background rows in a single `predict` (~0.15 s cold), cached per (ward, origin, horizon) | `_explain_cached` |
