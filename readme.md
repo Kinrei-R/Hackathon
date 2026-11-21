@@ -32,4 +32,17 @@ No API keys, no paid services, no network calls at runtime. The front end has no
 - See all 60 wards as a **risk heatmap board** (colour = tier, number = expected cases), plus a ranked
 list of the highest-risk wards with an 80% range and the tier they *could* reach.
 - Click a ward to see its forecast fan for 2, 3 and 4 weeks, recent cases and rainfall, **driver
-  breakdown** (exact Shapley contributions per factor group), and key weather readings vs. typical. 
+  breakdown** (exact Shapley contributions per factor group), and key weather readings vs. typical.
+- **Model validation** tab: chronological hold-out metrics (MAE, RMSE, tier accuracy, interval
+coverage), baseline comparison, per-horizon accuracy, predicted vs. actual series, confusion matrix
+and the rain-to-cases lag correlation.
+- When the chosen origin is in the past, actual outcomes are shown next to predictions. At the latest
+week (2025-12-29) forecasts are genuine future predictions with no outcome yet.
+
+## Results (held-out 2024-2025 targets, 18,900 ward-weeks)
+
+| | MAE | RMSE |
+|---|---|---|
+| **This model** | **1.10** | **2.16** |
+| Ward seasonal average | 1.26 | 2.45 |
+| Last week's cases carried forward | 1.86 | 3.58 |
