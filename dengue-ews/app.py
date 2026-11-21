@@ -122,6 +122,16 @@ def validation():
     return _cached(STATE["p"].validation(), 3600)
 
 
+@app.post("/api/retrain")
+def retrain():
+    """Re-ingest dataset, retrain models on updated history, and hot-reload Predictor."""
+    from src.train import main as train
+
+    train()
+    STATE["p"] = Predictor()
+    return {"status": "retrained", "trained_at": STATE["p"].meta["trained_at"]}
+
+
 if __name__ == "__main__":
     print("Dashboard: http://127.0.0.1:8000")
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning")
