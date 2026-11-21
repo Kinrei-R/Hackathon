@@ -1,70 +1,168 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dengue early warning, Bangladesh city wards</title>
-<link rel="stylesheet" href="/static/style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Ward-level dengue outbreak risk for Bangladesh city corporations, 2 to 4 weeks ahead, from rainfall, temperature and humidity lags.">
+  <meta name="theme-color" content="#f8fafc">
+  <title>Bangladesh Dengue Surveillance | Ward-level outbreak forecast</title>
+  <link rel="stylesheet" href="static/styles.css">
 </head>
 <body>
-<header class="top">
-  <div>
-    <h1>Dengue early warning</h1>
-    <p class="sub">Ward-level risk 2 to 4 weeks ahead, from rainfall, temperature and humidity lags</p>
-  </div>
-  <nav class="tabs" role="tablist" aria-label="Views">
-    <button role="tab" id="tab-forecast" aria-selected="true" data-view="forecast">Forecast</button>
-    <button role="tab" id="tab-validation" aria-selected="false" data-view="validation">Model validation</button>
+
+<!-- ============ Floating island navigation ============ -->
+<header class="lp-nav" role="banner">
+  <a class="lp-nav__brand" href="#top" aria-label="Bangladesh Dengue Surveillance, back to top">
+    <span class="lp-nav__brand-text">Bangladesh Dengue Surveillance</span>
+  </a>
+  <nav class="lp-nav__links" aria-label="Primary">
+    <a class="lp-nav__ghost" href="#how-it-works">Methodology</a>
+    <a class="lp-nav__cta" href="#live-dashboard">Forecast Tool</a>
   </nav>
 </header>
 
-<main id="view-forecast" class="layout">
-  <aside class="rail" aria-label="Forecast controls">
-    <section>
-      <h2>Forecast made on</h2>
-      <div class="datebox">
-        <button id="prev" class="step" aria-label="Previous week">&lsaquo;</button>
-        <output id="origin-label" class="origin" aria-live="polite"></output>
-        <button id="next" class="step" aria-label="Next week">&rsaquo;</button>
-      </div>
-      <input id="origin-slider" type="range" min="0" value="0" aria-label="Forecast origin week">
-      <div class="presets" id="presets"></div>
-    </section>
-    <section>
-      <h2>Look ahead</h2>
-      <div class="seg" id="horizon" role="group" aria-label="Lead time in weeks">
-        <button data-h="2">2 weeks</button><button data-h="3" class="on">3 weeks</button><button data-h="4">4 weeks</button>
-      </div>
-      <p class="hint" id="target-note"></p>
-    </section>
-    <section>
-      <h2>City</h2>
-      <select id="city" aria-label="City filter"></select>
-    </section>
-    <section>
-      <h2>Risk tiers</h2>
-      <ul class="legend" id="legend"></ul>
-      <p class="hint">Tier is set by expected cases per ward-week, using cut points learned from the training years.</p>
-    </section>
-  </aside>
+<main id="top">
 
-  <section class="center">
-    <div class="summary" id="summary" aria-live="polite"></div>
-    <div class="board" id="board" aria-label="Ward risk board"></div>
-    <div class="panel">
-      <h2>Highest-risk wards for this window</h2>
-      <table class="rank" id="rank"></table>
+  <!-- ============ Hero ============ -->
+  <section class="lp-hero" aria-labelledby="hero-title">
+    <div class="lp-hero__inner">
+      <div class="lp-hero__copy">
+        
+        <h1 id="hero-title">Anticipate Dengue Outbreaks Across Bangladesh City Wards</h1>
+        <p class="lp-hero__lede">Heavy rain does not fill hospital beds the next morning. Our lag models read rainfall, temperature and humidity from the previous weeks, combine them with each ward's drainage, density and sanitation, and flag high-risk wards 2 to 4 weeks before cases peak.</p>
+        <div class="lp-hero__actions">
+          <a class="btn btn--primary" href="#live-dashboard">Open the forecast tool</a>
+          <a class="btn btn--ghost" href="#how-it-works">How the model works</a>
+        </div>
+        <dl class="lp-metrics">
+          <div><dt>Advance Warning</dt><dd>2&ndash;4 Weeks</dd></div>
+          <div><dt>Spatial Resolution</dt><dd>Ward-Level</dd></div>
+          <div><dt>Historical Training Dataset</dt><dd>2016&ndash;2025</dd></div>
+        </dl>
+      </div>
+
+      <aside class="lp-hero__panel" aria-label="The breeding clock">
+        <h2>The breeding clock</h2>
+        <ol class="clock">
+          <li><b>Week 0</b><span>Heavy rain fills drains, tyres and containers.</span></li>
+          <li><b>Weeks 1&ndash;2</b><span>Aedes aegypti eggs mature into adult mosquitoes in 7 to 14 days.</span></li>
+          <li><b>Weeks 2&ndash;4</b><span>Viral incubation, then symptoms and hospital admissions.</span></li>
+        </ol>
+        <p class="clock__foot">Spraying after admissions rise is already weeks behind. This tool moves the decision to the rain.</p>
+      </aside>
     </div>
   </section>
 
-  <aside class="detail" id="detail" aria-live="polite">
-    <p class="empty">Pick a ward on the board to see its forecast, the weather behind it, and the factors driving the score.</p>
-  </aside>
+  <!-- ============ Methodology ============ -->
+  <section id="how-it-works" class="section" aria-labelledby="method-title">
+    <div class="section__head">
+      <h2 id="method-title">From weather to ward risk in three steps</h2>
+      <p>Every forecast is built only from data available on the day it is made, then checked on years the model never saw.</p>
+    </div>
+    <div class="steps">
+      <article class="step-card">
+        <span class="step-card__no" aria-hidden="true">1</span>
+        <h3>Read the local weather</h3>
+        <p>Weekly rainfall, average temperature and relative humidity for each of the 60 wards.</p>
+        <ul class="tags"><li>Rainfall (mm)</li><li>Avg temp (&deg;C)</li><li>Humidity (%)</li></ul>
+      </article>
+      <article class="step-card">
+        <span class="step-card__no" aria-hidden="true">2</span>
+        <h3>Shift it by the breeding lag</h3>
+        <p>Rain is lagged 0 to 8 weeks and summed over 2, 4 and 8 weeks. Cases follow rain most closely about 3 weeks later.</p>
+        <figure class="lagbars" aria-label="Correlation of cases with rainfall by lag, weeks 0 to 8">
+          <div style="--v:.53"><i></i><span>0</span></div>
+          <div style="--v:.59"><i></i><span>1</span></div>
+          <div style="--v:.67"><i></i><span>2</span></div>
+          <div class="is-peak" style="--v:.75"><i></i><span>3</span></div>
+          <div style="--v:.68"><i></i><span>4</span></div>
+          <div style="--v:.54"><i></i><span>5</span></div>
+          <div style="--v:.50"><i></i><span>6</span></div>
+          <div style="--v:.46"><i></i><span>7</span></div>
+          <div style="--v:.41"><i></i><span>8</span></div>
+          <figcaption>Correlation of weekly cases with rain k weeks earlier</figcaption>
+        </figure>
+      </article>
+      <article class="step-card">
+        <span class="step-card__no" aria-hidden="true">3</span>
+        <h3>Weigh ward vulnerability</h3>
+        <p>A gradient-boosted model combines the lags with drainage bottlenecks, crowding and waste collection, then assigns a risk tier with an 80% range.</p>
+        <ul class="tags"><li>Water-logging index</li><li>Population density</li><li>Sanitation score</li></ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ Live forecast dashboard ============ -->
+  <section id="live-dashboard" class="section section--dash" aria-labelledby="dash-title">
+    <div class="dash-head">
+      <div>
+        <h2 id="dash-title">Ward forecast dashboard</h2>
+        <p class="dash-head__sub">Choose when the forecast is made and how far ahead to look. Select any ward for its drivers.</p>
+      </div>
+      <div class="dash-head__side">
+        <span class="status"><span class="pulse-dot" aria-hidden="true"></span>Model online</span>
+        <nav class="tabs" role="tablist" aria-label="Views">
+          <button type="button" role="tab" id="tab-forecast" aria-selected="true" data-view="forecast">Forecast</button>
+          <button type="button" role="tab" id="tab-validation" aria-selected="false" data-view="validation">Model validation</button>
+        </nav>
+      </div>
+    </div>
+
+    <!-- Forecast view -->
+    <div id="view-forecast" class="layout">
+      <aside class="rail" aria-label="Forecast controls">
+        <section class="ctl">
+          <h3 class="ctl__title">Forecast made on</h3>
+          <div class="datebox">
+            <button type="button" id="prev" class="step" aria-label="Previous week">&lsaquo;</button>
+            <output id="origin-label" class="origin" aria-live="polite"></output>
+            <button type="button" id="next" class="step" aria-label="Next week">&rsaquo;</button>
+          </div>
+          <input id="origin-slider" type="range" min="0" value="0" aria-label="Forecast origin week">
+          <div class="presets" id="presets"></div>
+        </section>
+        <section class="ctl">
+          <h3 class="ctl__title">Look ahead</h3>
+          <div class="seg" id="horizon" role="group" aria-label="Lead time in weeks">
+            <button type="button" data-h="2">2 weeks</button><button type="button" data-h="3" class="on">3 weeks</button><button type="button" data-h="4">4 weeks</button>
+          </div>
+          <p class="hint" id="target-note"></p>
+        </section>
+        <section class="ctl">
+          <h3 class="ctl__title"><label for="city">City</label></h3>
+          <select id="city" aria-label="City filter"></select>
+        </section>
+        <section class="ctl">
+          <h3 class="ctl__title">Risk tiers</h3>
+          <ul class="legend" id="legend"></ul>
+          <p class="hint">Tier is set by expected cases per ward-week, using cut points learned from the training years.</p>
+        </section>
+      </aside>
+
+      <section class="center">
+        <div class="summary" id="summary" aria-live="polite"></div>
+        <div class="board" id="board" aria-label="Ward risk board"></div>
+        <div class="panel">
+          <h3 class="panel__title">Highest-risk wards for this window</h3>
+          <table class="rank" id="rank"></table>
+        </div>
+      </section>
+
+      <aside class="detail" id="detail" aria-live="polite">
+        <p class="empty">Pick a ward on the board to see its forecast, the weather behind it, and the factors driving the score.</p>
+      </aside>
+    </div>
+
+    <!-- Validation view -->
+    <div id="view-validation" class="validation" hidden></div>
+  </section>
+
 </main>
 
-<main id="view-validation" class="validation" hidden></main>
+<footer class="foot">
+  <p>Trained locally on 2016&ndash;2025 weekly ward data. Predictions are decision support, not a diagnosis. <span id="trained"></span></p>
+</footer>
 
-<footer class="foot">Trained locally on 2016-2025 weekly ward data. Predictions are decision support, not a diagnosis. <span id="trained"></span></footer>
-<script src="/static/app.js"></script>
+<script src="static/app.js"></script>
 </body>
 </html>
