@@ -2,16 +2,38 @@
 
 Ward-level dengue outbreak risk (**Low / Medium / High / Critical**) forecast **2 to 4 weeks ahead** across **60 urban wards** in Dhaka North, Dhaka South, Chattogram, Gazipur, and Narayanganj—built from multi-week rainfall, temperature, and humidity lags, biological *Aedes* breeding interactions, and static ward vulnerability.
 
-EDU AI Engineering Hackathon 2026 — Phase 1 (Preliminary Round).
+Addresses the **Urban Dengue Outbreak Early-Warning System** challenge for the **EDU AI Engineering Hackathon 2026 (Phase 1 — Preliminary Round)**, enabling municipal health officers to allocate fogging, larvicide, and hospital surge capacity before outbreaks peak without waiting on delayed clinical reporting.
 
-## Run Locally (Under 3 Minutes)
+## Demo
 
-Requires **Python 3.10+**.
+- **Live Deployed App:** `https://hackathon-t5qe.onrender.com/` *(update with your exact Render URL if different; free-tier instances may take ~30s to wake on first load)*
+- **Local URL:** `http://127.0.0.1:8000` (see **Setup & Run Instructions** below for instant zero-latency local execution)
+
+## Team — Kinrei-X
+
+| Member | GitHub | Role & Contributions |
+| :--- | :--- | :--- |
+| **Gias Uddin Muntasir Rifat** | `@Kinrei-R` | Team Lead, ML Modeling & Feature Engineering (`src/features.py`, `src/train.py`, `src/inference.py`), FastAPI Backend (`app.py`), Interactive What-If Simulator |
+| **Fabiha Belal** | `@FabihaBelal` | Documentation (`README.md`), Validation & Metric Analysis, Exploratory Data Verification |
+| **Syed Tihan** | `@Syed-Tihan` | System Architecture (`ARCHITECTURE.md`), Limitations & Production Roadmap, QA Testing |
+
+## Tech Stack
+
+- **Language:** Python 3.10+
+- **Machine Learning & Data Processing:** `scikit-learn` (`HistGradientBoostingRegressor` with Poisson & Quantile losses), `pandas`, `numpy`, `joblib`, `openpyxl`
+- **Backend & API:** `FastAPI`, `Uvicorn`, `Pydantic` (with `GZipMiddleware` and HTTP `Cache-Control`)
+- **Frontend & Visualization:** Vanilla HTML5, CSS3, JavaScript (ES6+), custom inline SVG charts (zero external CDN or chart library dependencies)
+- **Hosting & Version Control:** Git / GitHub, Render Web Service
+
+## Setup & Run Instructions (Under 3 Minutes)
+
+Requires **Python 3.10+**. **No `.env` file, API keys, or environment variables are required.**
 
 ```bash
-git clone https://github.com/Kinrei-R/Hackathon.git dengue-ews
-cd dengue-ews
+git clone https://github.com/Kinrei-R/Hackathon.git
+
 python -m venv .venv
+
 # Linux / macOS:
 source .venv/bin/activate
 # Windows (PowerShell):
@@ -23,23 +45,21 @@ python app.py
 
 Open **http://127.0.0.1:8000** in your browser.
 
-Pre-trained horizon-specialized models are committed in `models/`, so the dashboard starts immediately with no mandatory training step. If artifacts are missing or incompatible with the local `scikit-learn` version, `app.py` automatically retrains once on startup (~23 seconds).
-- Manual retraining: `python -m src.train`
-- Run lag & leakage verification tests: `python -m tests.test_pipeline`
-
-No API keys, no paid cloud services, and zero external network calls at runtime. The front end uses vanilla HTML/CSS/JS with zero CDN dependencies.
+Pre-trained horizon-specialized models are committed in `models/`, so the dashboard launches immediately with no mandatory training step. If artifacts are missing or saved under a different `scikit-learn` version, `app.py` automatically retrains once on startup (~23 seconds).
+- **Manual retraining:** `python -m src.train`
+- **Run lag & zero-leakage tests:** `python -m tests.test_pipeline`
 
 ## Dashboard Capabilities
 
-- **Ward Risk Heatmap & Ranked Triage Board:** Select any forecast origin week (slider, step buttons, or presets such as *Peak 2025*), lead time (**2, 3, or 4 weeks**), and City Corporation filter to view all 60 wards color-coded by risk tier alongside expected cases, 80% prediction intervals (`q10`–`q90`), and worst-case tier escalation.
-- **Ward Detail & Exact Shapley Driver Breakdown:** Click any ward to inspect its 2–4 week forecast fan, 16-week historical case and rainfall trend, local weather readings vs. typical baseline, and exact **Shapley value driver attributions** (multi-week rainfall breeding lag, ward vulnerability & breeding synergy, temperature, humidity, and seasonality).
+- **Ward Risk Heatmap & Ranked Triage Board:** Select any forecast origin week (slider, step buttons, or presets such as *Peak 2025*), lead time (**2, 3, or 4 weeks**), and City Corporation filter to inspect all 60 wards color-coded by risk tier alongside expected cases, 80% prediction intervals (`q10`–`q90`), and worst-case tier escalation.
+- **Ward Detail & Exact Shapley Driver Breakdown:** Click any ward to inspect its 2–4 week forecast fan, 16-week historical case and rainfall trend, local weather readings vs. typical baseline, and exact **Shapley value driver attributions** across 8 grouped factors.
 - **Interactive What-If Weather Simulator:** Adjust rainfall (`0–350 mm`), temperature (`12–42 °C`), and humidity (`30–100 %`) sliders for any ward to dynamically simulate how shifting monsoon conditions alter predicted cases, risk tier, and Shapley drivers in real time.
 - **Model Validation & Calibration Tab:** Inspect out-of-sample chronological hold-out metrics (`2024–2025`), baseline comparisons, per-horizon accuracy (`h = 2, 3, 4`), predicted-vs-actual time series, 4×4 tier confusion matrices, and empirical rainfall-to-cases lag correlations.
 
 ## Held-Out Test Results (2024–2025 Targets, 18,900 Ward-Weeks)
 
 | Model / Baseline | MAE | RMSE |
-|---|---|---|
+| :--- | :---: | :---: |
 | **Horizon-Specialized Poisson HGB (This Model)** | **1.071** | **2.110** |
 | Ward seasonal average | 1.259 | 2.453 |
 | Last week's cases carried forward (persistence) | 1.861 | 3.582 |
@@ -47,8 +67,6 @@ No API keys, no paid cloud services, and zero external network calls at runtime.
 - **$R^2$:** `0.720` | **Exact Tier Accuracy:** `78.9%` | **Within ±1 Tier:** `99.2%`
 - **High/Critical Recall:** `59.5%` | **High/Critical Precision:** `60.3%`
 - **80% Interval Coverage (`q10`–`q90`):** `94.0%` (well-calibrated conservative uncertainty bounds)
-
-Full metrics and per-horizon breakdowns are stored in `models/model_metadata.json` and displayed in the **Model validation** tab.
 
 ## Repository Layout
 
@@ -67,7 +85,7 @@ ARCHITECTURE.md         System data flow diagram, chronological split, model rat
 ## API Endpoints
 
 | Method & Endpoint | Purpose |
-|---|---|
+| :--- | :--- |
 | `GET /api/bootstrap` | Available origin weeks, cities, wards, and calibrated tier thresholds |
 | `GET /api/forecast?origin=2025-08-04&horizon=3&city=` | Risk tier, expected cases, and 80% interval for all 60 wards |
 | `GET /api/ward/{ward_id}?origin=&horizon=` | 2–4 week forecast fan, Shapley drivers, key readings, and history |
@@ -75,8 +93,14 @@ ARCHITECTURE.md         System data flow diagram, chronological split, model rat
 | `GET /api/validation` | Chronological hold-out metrics, baselines, confusion matrices, and lag evidence |
 | `POST /api/retrain` | Re-ingest updated dataset, retrain models, and hot-reload predictor |
 
-## AI Assistants & External APIs Disclosure
+## AI Tools & APIs Disclosure
 
-- **Claude (Anthropic):** Used for initial scaffolding of the data pipeline, model training scripts, test suite, and documentation drafts.
-- **Google Gemini:** Used for model architecture refinement (horizon-specialized models, biological breeding interaction features), interactive What-If weather simulator integration, UI/UX refinements, and rubric validation.
-- **External APIs / Cloud Services:** None. All training and inference run 100% locally using open-source Python libraries (`scikit-learn`, `pandas`, `numpy`, `fastapi`, `uvicorn`, `joblib`, `openpyxl`) with zero external API calls or LLM token usage at runtime.
+- **Claude (Anthropic):** Used during initial development to scaffold the multi-week lag feature pipeline, baseline training/validation scripts, unit test suite, and initial documentation structure. All generated code was reviewed, tested, and modified by the team.
+- **Google Gemini:** Used for model optimization (horizon-specialized models for $h \in \{2, 3, 4\}$ and biological *Aedes* breeding interaction features), adding the live What-If weather simulator (`POST /api/simulate`) and hot-reload retraining endpoint (`POST /api/retrain`), frontend polish, and rubric verification.
+- **External APIs & Model Endpoints:** None. No LLM endpoints, paid APIs, or external network calls are used during training or runtime inference (`$0.00` operational API/token cost).
+
+## Attributions
+
+- **Dataset:** `data/hackathon_preli_dataset.xlsx` provided by the EDU AI Engineering Hackathon 2026 organizers.
+- **Open-Source Libraries:** Built with `scikit-learn`, `pandas`, `numpy`, `FastAPI`, `Uvicorn`, `joblib`, and `openpyxl` under their respective open-source (BSD/MIT) licenses.
+- **Frontend Assets & Visualizations:** All HTML/CSS styling, interactive heatmap boards, forecast fans, and SVG charts in `static/` were built from scratch by the team with no external templates, icon fonts, or third-party charting libraries.
