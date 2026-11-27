@@ -1,79 +1,118 @@
-# System Architecture
+# ARCHITECTURE
 
-## 1. Data Flow
+Tag: `version-onsite-final`
 
-```text
- hackathon_preli_dataset.xlsx  (31,320 rows: 60 wards x 522 weeks)
-            |
-            v
- src/features.py  build_panel()
-   per ward_id & city (groupby, sorted by date):
-   - rainfall lags 0-8 wk, rolling sums (2/4/8 wk), 4-wk max, wet-week count, momentum
-   - temperature & humidity lags (0/2/4 wk), 4-wk means, Aedes thermal suitability score
-   - biological & spatial interactions: breeding_suitability_idx, stagnation_hazard,
-     crowding_sanitation_risk, and city_rain_breeding_win (urban spillover)
-   - static vulnerability: population density, water-logging index, sanitation score
-   - targets y_h2, y_h3, y_h4 = dengue cases 2, 3, and 4 weeks AFTER origin week t
-            |
-            v
- add_horizon() / stack_horizons(): per-lead-time framing (h in {2, 3, 4})
-   + 1st & 2nd harmonic target-week seasonality (sin/cos of week of year)
-            |
-            v
- src/train.py  chronological split by TARGET date
-   train <= 2022-12-31 | validation 2023 | test 2024-01-01 onward
-            |
-            +--> Horizon-Specialized HGB (Poisson, h=2,3,4)  -> dengue_model.joblib
-            +--> Horizon-Specialized HGB (Quantile q10/q90)  -> dengue_q10 / q90.joblib
-            +--> Calibrated tier thresholds (65th/85th/96th) -> model_metadata.json
-            +--> Precomputed lag panel & background sample   -> feature_store.joblib
-            |
-            v
- src/inference.py   Predictor (loaded once at FastAPI startup)
-   - forecast(origin, h): 3 vectorised predict() calls on 60 rows (~30 ms), memoised
-   - ward_detail(): exact Shapley attribution over 8 feature groups, memoised
-   - simulate_ward(): live what-if weather perturbation + interaction recomputation
-            |
-            v
- app.py (FastAPI + GZip + Cache-Control) <-> /api/* JSON <-> static/ dashboard (SVG)
+## 1. Data (`bangladesh_dengue_large_dataset_onsite.xlsx`, sheet `bangladesh_dengue_large_dataset`)
+
+31,320 rows x 15 columns = 60 wards x 522 weeks (2016-01-04 to 2025-12-29). Cities: Dhaka North (20 wards), Dhaka South (20), Chattogram (10), Gazipur (5), Narayanganj (5).
+
+| Column | min | median | p90 | max |
+|---|---|---|---|---|
+| `dengue_cases` | 0 | 0 | 9 | 41 |
+| `saline_bags_needed` | 0 | 0 | 21 | 98 |
+| `diagnostic_kits_needed` | 0 | 0 | 10 | 48 |
+| `hospital_beds_required` | 0 | 0 | 3 | 12 |
+
+Observed supply per case (dataset-wide): saline 2.378, kits 1.147, beds 0.289. Ward density, water-logging, and sanitation are constant per ward. Zero-inflated, right-skewed counts motivate Poisson loss and quantile bands.
+
+## 2. Forecasting core
+
+Features (`src/features.py`), per ward, at origin week t:
+- Lags k = 0..8 of `rainfall_mm`, `avg_temp_c`, `relative_humidity_pct` (27 columns)
+- `rain_x_waterlog = rainfall_mm * water_logging_risk_index`
+- `dens_x_unsanitary = population_density_sqkm * (1 - sanitation_score)`
+- Case lags 0..3 and 4-week moving average, sin/cos week-of-year, static ward covariates, max/min temperature
+
+Models (`src/train.py`): for h in {2, 3, 4}, three `HistGradientBoostingRegressor` models on target `cases(t+h)`: `loss="poisson"` (mean), `loss="quantile"` at 0.10 and 0.90. 9 models, seed 42, no early stopping (deterministic).
+
+Chronological protocol:
+- Holdout = last 52 weeks (from 2025-01-06). Train rows require `date + h weeks < holdout start` (no target leakage).
+- Holdout fits are saved to `artifacts/models_holdout/` (used by the peak-season replay).
+- Serving fits use all labelled rows (`artifacts/models/`).
+- Intervals are made monotone: `lo = min(q10, mean)`, `hi = max(q90, mean)`.
+
+Holdout results:
+
+| h | MAE | RMSE | MAE persistence | q10-q90 coverage | mean width |
+|---|---|---|---|---|---|
+| 2 | 1.069 | 2.072 | 1.803 | 93.3% | 4.36 |
+| 3 | 1.183 | 2.250 | 2.106 | 92.6% | 4.51 |
+| 4 | 1.294 | 2.463 | 2.342 | 92.3% | 4.60 |
+
+Scenarios: `live` (origin 2025-12-29, final models; off-season so forecasts are near zero) and `peak` (origin 2025-06-09, the holdout week with the most actual cases at t+3; out-of-sample models).
+
+## 3. Operations (`src/operations.py`)
+
+Planning cases per ward: `pred = mean over h of forecast_h * surge` (or the mean of q90 for the upper basis); `c = round(pred)`.
+
+Demand conversion (ward-specific empirical ratios r = sum(resource) / sum(cases), global ratio if a ward has no cases):
+
+```
+saline_req = ceil(r_saline * c)    kits_req = ceil(r_kits * c)
+beds_req   = ceil(r_beds * c)      crews_req = ceil(c / 8)
 ```
 
-- **Request/Response Loop:** The browser UI (`static/index.html`, `styles.css`, `app.js`) communicates exclusively with the FastAPI backend (`app.py`) over local REST JSON endpoints (`/api/bootstrap`, `/api/forecast`, `/api/ward/{ward_id}`, `/api/simulate`, `/api/validation`, `/api/retrain`).
-- **External Services:** None at runtime. All meteorological features, trained models, and static assets are self-contained inside the repository.
+Priority:
 
-## 2. Design Choices & Trade-Offs
+```
+priority = pred * sqrt(density / max_density) * (1 + water_logging_risk_index) * (2 - sanitation_score)
+```
 
-- **Horizon-Specialized Poisson GBDTs vs. Single Pooled Model / Deep Learning:**
-  - *Choice:* Separate `HistGradientBoostingRegressor` models with Poisson deviance loss for $h \in \{2, 3, 4\}$ weeks (`h=2`: 148 trees, `h=3`: 144 trees, `h=4`: 222 trees).
-  - *Trade-off:* Ward-week dengue counts are zero-inflated (58% zeros) with sharp monsoon spikes. Poisson loss guarantees non-negative predictions and outperforms squared-error loss on skewed counts, while horizon-specific trees capture how biological incubation lags shift from 2 to 4 weeks without requiring GPU compute or large neural checkpoints (`~4.5 MB` total artifacts).
-- **Chronological Validation Split vs. Random K-Fold:**
-  - *Choice:* Strict target-date partitioning (`<= 2022` train: 63,720 rows; `2023` validation: 9,360 rows; `2024–2025` test: 18,900 rows).
-  - *Trade-off:* Random k-fold leaks temporally autocorrelated weeks across folds and inflates accuracy. Chronological splitting yields a stricter, realistic out-of-sample benchmark (`Test MAE 1.071`, `RMSE 2.110`, $R^2 = 0.720$).
-- **Weather-Only Production Design vs. Lagged Case Autoregression:**
-  - *Choice:* Exclude lagged clinical case counts from production features.
-  - *Trade-off:* An ablation adding lagged cases (`cases_lag_0..3`, `cases_mean_4w`, `cases_trend`) degraded test MAE (`1.099` vs. `1.071` weather-only) and would make early warnings vulnerable to hospital reporting delays.
-- **Quantile Intervals (`q10`–`q90`) & Group Shapley Attributions:**
-  - *Choice:* Dedicated 10th/90th percentile models (`94.0%` empirical coverage—conservatively calibrated above the `80%` nominal target) plus exact Shapley attributions across 8 correlated feature groups rather than single raw columns so rainfall lags share credit fairly.
+Allocation: wards sorted by priority descending. Stock pools are regional: `pool_city,r = floor(stock% * sum_city req_r)` for saline and kits. Crews are one global pool in `[10, 120]`. For each ward in order: `alloc = min(req, remaining pool)`. Shortfall = req - alloc. A ward with any shortfall is flagged `CRITICAL DEFICIT` with exact counts; `fulfillment% = 100 * min_r(alloc_r / req_r)`.
 
-## 3. Efficiency: Token Budget, Caching & Latency
+Bed routing:
 
-- **Token Budget & Prompt Strategy:** **Zero LLM tokens (`$0.00` runtime cost).** Instead of routing tabular epidemiological forecasting through expensive, high-latency LLM prompts, deterministic gradient-boosted inference and exact Shapley game-theoretic attributions execute locally in milliseconds.
-- **Startup & Feature Store Precomputation:** Models are trained offline (`~21 s` on 1 CPU), compressed via `joblib` (`compress=3`), and loaded once at startup (`<1 s`). `models/feature_store.joblib` caches the pre-engineered lag panel so requests never re-parse `.xlsx` files.
-- **Multi-Layer Caching & Latency Controls:**
-  - *Backend Memoization:* `forecast()` runs 3 vectorized `predict()` calls across 60 wards (`~30 ms` cold) and caches results via `@lru_cache(maxsize=512)` (`<1 ms` warm). `ward_detail()` batches all `256` Shapley coalitions $\times$ `40` background rows into a single vectorized pass (`~0.15 s` cold) and caches per `(ward_id, origin, horizon)`.
-  - *Network & Browser Caching:* FastAPI compresses payloads with `GZipMiddleware` and attaches `Cache-Control` headers (`600s`–`3600s`); `static/app.js` caches responses in an in-memory `Map`, filters cities client-side without extra API calls, and debounces What-If weather slider inputs by `120 ms`.
+```
+capacity = max(4, round(1.15 * p90(ward hospital_beds_required history)))
+overflow = max(0, beds_req - capacity)      spare = max(0, capacity - beds_req)
+```
 
-## 4. Resilience & Fault Tolerance
+Per city only: donors (largest overflow first) send to the receiver with the most spare beds. Output: manifest (from, to, patients), `utilization% = sum beds_req / sum capacity`, and unmet = overflow - routed. No cross-city edges exist.
 
-- **Immunity to External Network Outages & API Rate Limits:** Because no third-party weather APIs, LLM endpoints, or external CDNs are called at runtime, the dashboard cannot fail due to upstream rate limits (`HTTP 429`), expired API keys, or external service downtime.
-- **Self-Healing Model Loading:** On startup (`app.py`), if `models/*.joblib` files are missing, corrupted, or incompatible with the host's `scikit-learn` binary version, the server catches the exception and automatically executes `train_and_save()` to regenerate valid artifacts before accepting requests.
-- **Strict Input Validation & Graceful Frontend Degradation:**
-  - FastAPI validates query and JSON body parameters (`origin`, `horizon`, `ward_id`, and physical weather bounds in `POST /api/simulate`), returning structured `400`/`404`/`422` JSON responses on invalid inputs rather than unhandled server errors.
-  - On transient client-to-server network interruptions (or cold-start wake-up on cloud free tiers), `static/app.js` catches failed `fetch()` calls, surfaces a non-blocking status banner, and preserves the last rendered board state without crashing the UI.
-- **Atomic Hot-Reload on Retraining:** `POST /api/retrain` completes dataset ingestion, feature verification, and model serialization before swapping the active `Predictor` instance in memory, ensuring uninterrupted service if a retrain payload is invalid.
+Counterfactual (k crews, k in 0..3):
 
-## 5. Limitations & Next Steps
+```
+wl' = wl * (1 - min(0.65, 0.22 k))        san' = min(1.0, san + 0.12 k)
+```
 
-- **Live Meteorological Feed Integration:** In production, `load_raw()` can ingest weekly Bangladesh Meteorological Department (BMD) gridded forecasts with zero changes to downstream feature engineering or inference.
-- **Ward Boundary GeoJSON:** Adding official City Corporation GeoJSON polygons will upgrade the city-grouped ward grid into an interactive choropleth map.
-- **Surveillance Threshold Recalibration:** Tier cut points (`1.0`, `8.0`, `14.0` cases/ward-week) are calibrated to the preliminary dataset and should be recalibrated against DGHS hospital surveillance counts upon deployment.
+Primary path: recompute the two interaction features, re-run the 3 mean models for t+2..t+4, `delta_h = base_h - cf_h`. Deterministic fallback (used per cell when the model path gives no reduction, or when model files are missing):
+
+```
+cf_h = base_h * [(1 + wl') / (1 + wl)] * [(2 - san') / (2 - san)]
+```
+
+Aggregation with lifecycle weights `w = (0.65, 0.90, 1.00)`:
+
+```
+cases_prevented = sum_h w_h * delta_h        beds_freed = r_beds * cases_prevented
+saline_saved    = r_saline * cases_prevented  ROI = cases_prevented / k
+```
+
+All 60 wards are ranked by best ROI over k = 1..3. Auto-assign adds crews one at a time to the ward with the largest marginal cases prevented (max 3 per ward). Each result is labelled `ml`, `fallback`, or `mixed`.
+
+Dispatch: fixed templates produce an SMS (shortened in steps to stay <= 160 characters), a WhatsApp brief, and a printable HTML brief with `@media print`.
+
+## 4. Data flow
+
+```
+xlsx -> train.py -> models/ + models_holdout/ + latest*.joblib + meta.json
+                 -> forecasts*.csv + effects*.json (precomputed fallback)
+FastAPI -> inference.Engine (ML, or precomputed if models fail to load)
+        -> operations.plan: demand -> priority allocation -> bed routing
+        -> operations.simulate: counterfactual effects -> ROI ranking
+        -> operations.sms / whatsapp / commissioner_html -> exports/
+static/ (landing.*, index.html, styles.css, app.js) <-> /api/* on 127.0.0.1
+```
+
+## 5. Offline guarantees
+
+| Guarantee | Mechanism |
+|---|---|
+| No external assets | Local `static/` only; system font stacks; stress test scans text assets for external URLs; Content-Security-Policy restricts the browser to the same origin |
+| No outbound traffic | `/api/stress-test` patches socket connect and DNS during a full pipeline run; any non-loopback attempt fails and is counted; a probe to 8.8.8.8:53 must be blocked |
+| Model-file failure | Engine falls back to `forecasts*.csv` and `effects*.json`; verified with `models/` removed |
+| Determinism | Fixed seed, no early stopping, template text, no randomness; stress test hashes two runs |
+| City boundary | Routing loops run per city; stress test asserts zero cross-city transfers |
+| Stock integrity | Stress test asserts allocation <= demand, <= regional pool, <= crew limit |
+
+Stress test (9 checks) at 30% stock, 10 crews, surge 3x (and 1.5x for mixed routing): static scan, blocked-network pipeline run, kill-switch probe, repeat-run hash, no cross-city transfers, bed conservation, pool limits, 60 SMS <= 160 chars, 60-ward ROI ranking.
