@@ -1,169 +1,146 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Ward-level dengue outbreak risk for Bangladesh city corporations, 2 to 4 weeks ahead, from rainfall, temperature and humidity lags.">
-  <meta name="theme-color" content="#f8fafc">
-  <title>Bangladesh Dengue Surveillance | Ward-level outbreak forecast</title>
-  <link rel="stylesheet" href="static/styles.css">
-  <link rel="icon" type="image/png" href="/static/images/e-dengue-logo.png">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Command center | Kinrei EWS</title>
+<link rel="icon" href="/static/logo.png">
+<link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-
-<!-- ============ Floating island navigation ============ -->
-<header class="lp-nav" role="banner">
-  <a class="lp-nav__brand" href="#top" aria-label="Bangladesh Dengue Surveillance, back to top">
-    <span class="lp-nav__brand-text">Bangladesh Dengue Surveillance</span>
-  </a>
-  <nav class="lp-nav__links" aria-label="Primary">
-    <a class="lp-nav__ghost" href="#how-it-works">Methodology</a>
-    <a class="lp-nav__cta" href="#live-dashboard">Forecast Tool</a>
-  </nav>
+<a class="skip" href="#content">Skip to results</a>
+<header class="top">
+  <div class="title">
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span>Kinrei EWS</a>
+    <h1>Command center</h1>
+    <p id="asof" class="sub">Loading forecast window</p>
+  </div>
+  <div class="top-actions">
+    <span id="mode" class="mode" role="status"> OFFLINE ENGINE </span>
+    <a class="linkbtn" href="/">Overview</a>
+    <button id="stressBtn" class="primary">Offline kill-switch and stress test</button>
+  </div>
 </header>
+<div id="progress" class="progress" aria-hidden="true"></div>
+<div id="toast" class="toast" role="alert" hidden></div>
 
-<main id="top">
+<div class="shell">
+  <aside class="rail" aria-label="Controls">
+    <fieldset>
+      <legend>Scenario</legend>
+      <label class="radio"><input type="radio" name="scenario" value="peak" checked> <span id="lblPeak">Peak-season replay</span></label>
+      <label class="radio"><input type="radio" name="scenario" value="live"> <span id="lblLive">Live forecast</span></label>
+    </fieldset>
+    <label>City corporation
+      <select id="city"><option>All</option></select>
+    </label>
+    <label>Forecast basis
+      <select id="basis"><option value="expected">Expected cases</option><option value="upper">Upper bound (q90)</option></select>
+    </label>
+    <label>Available regional stock <output id="stockO">60%</output>
+      <input id="stock" type="range" min="30" max="100" step="5" value="60">
+    </label>
+    <label>Total spraying crews <output id="crewsO">40</output>
+      <input id="crews" type="range" min="10" max="120" step="1" value="40">
+    </label>
+    <label>Outbreak surge <output id="surgeO">1.0x</output>
+      <input id="surge" type="range" min="1" max="4" step="0.25" value="1">
+    </label>
+    <label>Color heatmap by
+      <select id="colorBy"><option value="rank">Priority rank</option><option value="cases">Expected cases per week</option></select>
+    </label>
+    <button id="resetBtn" class="ghost" type="button">Reset controls</button>
+    <div class="legend" aria-label="Heatmap legend">
+      <span id="legLo">Lower priority</span>
+      <i class="t0"></i><i class="t1"></i><i class="t2"></i><i class="t3"></i><i class="t4"></i><i class="t5"></i>
+      <span id="legHi">Higher</span>
+      <p><b class="flag">!</b> Red base edge marks a ward with a critical deficit.</p>
+    </div>
+  </aside>
 
-  <!-- ============ Hero ============ -->
-  <section class="lp-hero" aria-labelledby="hero-title">
-    <div class="lp-hero__inner">
-      <div class="lp-hero__copy">
-        
-        <h1 id="hero-title">Anticipate Dengue Outbreaks Across Bangladesh City Wards</h1>
-        <p class="lp-hero__lede">Heavy rain does not fill hospital beds the next morning. Our lag models read rainfall, temperature and humidity from the previous weeks, combine them with each ward's drainage, density and sanitation, and flag high-risk wards 2 to 4 weeks before cases peak.</p>
-        <div class="lp-hero__actions">
-          <a class="btn btn--primary" href="#live-dashboard">Open the forecast tool</a>
-          <a class="btn btn--ghost" href="#how-it-works">How the model works</a>
-        </div>
-        <dl class="lp-metrics">
-          <div><dt>Advance Warning</dt><dd>2&ndash;4 Weeks</dd></div>
-          <div><dt>Spatial Resolution</dt><dd>Ward-Level</dd></div>
-          <div><dt>Historical Training Dataset</dt><dd>2016&ndash;2025</dd></div>
-        </dl>
+  <main id="content" tabindex="-1">
+    <section aria-labelledby="hHeat">
+      <h2 id="hHeat">Ward risk heatmap</h2>
+      <div id="kpis" class="kpis" aria-live="polite"></div>
+      <div class="heatgrid">
+        <div id="heat" class="heat"></div>
+        <aside id="detail" class="detail" aria-labelledby="hDetail">
+          <h3 id="hDetail">Selected ward</h3>
+          <div id="detailBody"></div>
+        </aside>
       </div>
+    </section>
 
-      <aside class="lp-hero__panel" aria-label="The breeding clock">
-        <h2>The breeding clock</h2>
-        <ol class="clock">
-          <li><b>Week 0</b><span>Heavy rain fills drains, tyres and containers.</span></li>
-          <li><b>Weeks 1&ndash;2</b><span>Aedes aegypti eggs mature into adult mosquitoes in 7 to 14 days.</span></li>
-          <li><b>Weeks 2&ndash;4</b><span>Viral incubation, then symptoms and hospital admissions.</span></li>
-        </ol>
-        <p class="clock__foot">Spraying after admissions rise is already weeks behind. This tool moves the decision to the rain.</p>
-      </aside>
-    </div>
-  </section>
+    <section aria-labelledby="hAlloc">
+      <div class="sechead"><h2 id="hAlloc">Scarcity allocation, highest priority first</h2><button id="csvBtn" class="ghost" type="button">Download CSV</button></div>
+      <div class="scroll tall"><table id="alloc"></table></div>
+    </section>
 
-  <!-- ============ Methodology ============ -->
-  <section id="how-it-works" class="section" aria-labelledby="method-title">
-    <div class="section__head">
-      <h2 id="method-title">From weather to ward risk in three steps</h2>
-      <p>Every forecast is built only from data available on the day it is made, then checked on years the model never saw.</p>
-    </div>
-    <div class="steps">
-      <article class="step-card">
-        <span class="step-card__no" aria-hidden="true">1</span>
-        <h3>Read the local weather</h3>
-        <p>Weekly rainfall, average temperature and relative humidity for each of the 60 wards.</p>
-        <ul class="tags"><li>Rainfall (mm)</li><li>Avg temp (&deg;C)</li><li>Humidity (%)</li></ul>
-      </article>
-      <article class="step-card">
-        <span class="step-card__no" aria-hidden="true">2</span>
-        <h3>Shift it by the breeding lag</h3>
-        <p>Rain is lagged 0 to 8 weeks and summed over 2, 4 and 8 weeks. Cases follow rain most closely about 3 weeks later.</p>
-        <figure class="lagbars" aria-label="Correlation of cases with rainfall by lag, weeks 0 to 8">
-          <div style="--v:.53"><i></i><span>0</span></div>
-          <div style="--v:.59"><i></i><span>1</span></div>
-          <div style="--v:.67"><i></i><span>2</span></div>
-          <div class="is-peak" style="--v:.75"><i></i><span>3</span></div>
-          <div style="--v:.68"><i></i><span>4</span></div>
-          <div style="--v:.54"><i></i><span>5</span></div>
-          <div style="--v:.50"><i></i><span>6</span></div>
-          <div style="--v:.46"><i></i><span>7</span></div>
-          <div style="--v:.41"><i></i><span>8</span></div>
-          <figcaption>Correlation of weekly cases with rain k weeks earlier</figcaption>
-        </figure>
-      </article>
-      <article class="step-card">
-        <span class="step-card__no" aria-hidden="true">3</span>
-        <h3>Weigh ward vulnerability</h3>
-        <p>A gradient-boosted model combines the lags with drainage bottlenecks, crowding and waste collection, then assigns a risk tier with an 80% range.</p>
-        <ul class="tags"><li>Water-logging index</li><li>Population density</li><li>Sanitation score</li></ul>
-      </article>
-    </div>
-  </section>
-
-  <!-- ============ Live forecast dashboard ============ -->
-  <section id="live-dashboard" class="section section--dash" aria-labelledby="dash-title">
-    <div class="dash-head">
-      <div>
-        <h2 id="dash-title">Ward forecast dashboard</h2>
-        <p class="dash-head__sub">Choose when the forecast is made and how far ahead to look. Select any ward for its drivers.</p>
+    <section aria-labelledby="hBeds">
+      <h2 id="hBeds">Intra-city bed routing</h2>
+      <div class="two">
+        <div><h3>Transfer manifest</h3><div class="scroll"><table id="xfer"></table></div></div>
+        <div><h3>City bed utilization</h3><div class="scroll"><table id="cityTbl"></table></div></div>
       </div>
-      <div class="dash-head__side">
+    </section>
 
-        <nav class="tabs" role="tablist" aria-label="Views">
-          <button type="button" role="tab" id="tab-forecast" aria-selected="true" data-view="forecast">Forecast</button>
-          <button type="button" role="tab" id="tab-validation" aria-selected="false" data-view="validation">Model validation</button>
-        </nav>
-      </div>
-    </div>
-
-    <!-- Forecast view -->
-    <div id="view-forecast" class="layout">
-      <aside class="rail" aria-label="Forecast controls">
-        <section class="ctl">
-          <h3 class="ctl__title">Forecast made on</h3>
-          <div class="datebox">
-            <button type="button" id="prev" class="step" aria-label="Previous week">&lsaquo;</button>
-            <output id="origin-label" class="origin" aria-live="polite"></output>
-            <button type="button" id="next" class="step" aria-label="Next week">&rsaquo;</button>
+    <section id="overflowCard" aria-labelledby="hOvf">
+      <h2 id="hOvf">Hospital overflow transfer suggestion</h2>
+      <p id="ovfStatus" class="sub">Slide Outbreak surge to 1.5x or higher to trigger nearest-hospital transfer suggestions.</p>
+      <div id="ovfBody" hidden>
+        <div class="simbar">
+          <label>Overflow route <select id="ovfSel"></select></label>
+          <div id="ovfTabs" class="tabs" role="tablist" aria-label="Overflow transfer format">
+            <button role="tab" data-ovftab="sms" aria-selected="true">SMS</button>
+            <button role="tab" data-ovftab="wa" aria-selected="false">WhatsApp</button>
+            <button role="tab" data-ovftab="doc" aria-selected="false">Transfer brief</button>
           </div>
-          <input id="origin-slider" type="range" min="0" value="0" aria-label="Forecast origin week">
-          <div class="presets" id="presets"></div>
-        </section>
-        <section class="ctl">
-          <h3 class="ctl__title">Look ahead</h3>
-          <div class="seg" id="horizon" role="group" aria-label="Lead time in weeks">
-            <button type="button" data-h="2">2 weeks</button><button type="button" data-h="3" class="on">3 weeks</button><button type="button" data-h="4">4 weeks</button>
-          </div>
-          <p class="hint" id="target-note"></p>
-        </section>
-        <section class="ctl">
-          <h3 class="ctl__title"><label for="city">City</label></h3>
-          <select id="city" aria-label="City filter"></select>
-        </section>
-        <section class="ctl">
-          <h3 class="ctl__title">Risk tiers</h3>
-          <ul class="legend" id="legend"></ul>
-          <p class="hint">Tier is set by expected cases per ward-week, using cut points learned from the training years.</p>
-        </section>
-      </aside>
-
-      <section class="center">
-        <div class="summary" id="summary" aria-live="polite"></div>
-        <div class="board" id="board" aria-label="Ward risk board"></div>
-        <div class="panel">
-          <h3 class="panel__title">Highest-risk wards for this window</h3>
-          <table class="rank" id="rank"></table>
+          <button id="ovfCopyBtn" class="ghost" type="button">Copy text</button>
+          <button id="ovfPrintBtn" class="ghost" type="button">Print transfer brief</button>
         </div>
-      </section>
+        <div id="ovf-pane-sms" class="pane"><pre id="ovfSmsTxt" class="sms"></pre><p id="ovfSmsLen" class="sub"></p></div>
+        <div id="ovf-pane-wa" class="pane" hidden><pre id="ovfWaTxt" class="wa"></pre></div>
+        <div id="ovf-pane-doc" class="pane" hidden><iframe id="ovfDocFrame" title="Hospital transfer brief preview"></iframe></div>
+      </div>
+    </section>
 
-      <aside class="detail" id="detail" aria-live="polite">
-        <p class="empty">Pick a ward on the board to see its forecast, the weather behind it, and the factors driving the score.</p>
-      </aside>
-    </div>
+    <section aria-labelledby="hVec">
+      <h2 id="hVec">Vector-control simulator</h2>
+      <div class="simbar">
+        <label>Crews to auto-assign <input id="auto" type="number" min="1" max="180" value="12"></label>
+        <button id="autoBtn">Auto-assign crews</button>
+        <button id="selBtn">Simulate my selection</button>
+        <button id="clrBtn" class="ghost">Clear</button>
+      </div>
+      <div id="simTotals" class="totals"></div>
+      <div class="scroll tall"><table id="board"></table></div>
+    </section>
 
-    <!-- Validation view -->
-    <div id="view-validation" class="validation" hidden></div>
-  </section>
+    <section aria-labelledby="hDisp">
+      <h2 id="hDisp">Dispatch preview</h2>
+      <div class="simbar">
+        <label>Ward <select id="wardSel"></select></label>
+        <div id="dispTabs" class="tabs" role="tablist">
+          <button role="tab" data-tab="sms" aria-selected="true">SMS</button>
+          <button role="tab" data-tab="wa" aria-selected="false">WhatsApp</button>
+          <button role="tab" data-tab="doc" aria-selected="false">Commissioner brief</button>
+        </div>
+        <button id="copyBtn" class="ghost">Copy text</button>
+        <button id="printBtn" class="ghost">Print brief</button>
+      </div>
+      <div id="pane-sms" class="pane"><pre id="smsTxt" class="sms"></pre><p id="smsLen" class="sub"></p></div>
+      <div id="pane-wa" class="pane" hidden><pre id="waTxt" class="wa"></pre></div>
+      <div id="pane-doc" class="pane" hidden><iframe id="docFrame" title="Commissioner brief preview"></iframe></div>
+    </section>
+  </main>
+</div>
 
-</main>
-
-<footer class="foot">
-  <p>Trained locally on 2016&ndash;2025 weekly ward data. Predictions are decision support, not a diagnosis. <span id="trained"></span></p>
-</footer>
-
-<script src="static/app.js"></script>
+<dialog id="stress">
+  <h2>Offline kill-switch and outbreak stress test</h2>
+  <p id="stressSum" class="sub"></p>
+  <ul id="stressList" class="checks"></ul>
+  <button id="stressClose" class="primary">Close</button>
+</dialog>
+<script src="/static/app.js"></script>
 </body>
 </html>

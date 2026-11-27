@@ -1,106 +1,113 @@
-# Urban Dengue Outbreak Early-Warning System
+# dengue-ews: Urban Vector-Borne Outbreak Decision & Resource Dispatch Engine
 
-Ward-level dengue outbreak risk (**Low / Medium / High / Critical**) forecast **2 to 4 weeks ahead** across **60 urban wards** in Dhaka North, Dhaka South, Chattogram, Gazipur, and Narayanganj—built from multi-week rainfall, temperature, and humidity lags, biological *Aedes* breeding interactions, and static ward vulnerability.
+BLUEPINE
 
-Addresses the **Urban Dengue Outbreak Early-Warning System** challenge for the **EDU AI Engineering Hackathon 2026 (Phase 1 — Preliminary Round)**, enabling municipal health officers to allocate fogging, larvicide, and hospital surge capacity before outbreaks peak without waiting on delayed clinical reporting.
+Offline-first forecasting and dispatch for 60 wards in 5 Bangladesh city corporations. FastAPI + scikit-learn + vanilla HTML/CSS/JS. No CDNs, no cloud APIs, no LLM calls at runtime.
 
-## Demo
-
-- **Live Deployed App:** `https://hackathon-t5qe.onrender.com/` *(update with your exact Render URL if different; free-tier instances may take ~30s to wake on first load)*
-- **Local URL:** `http://127.0.0.1:8000` (see **Setup & Run Instructions** below for instant zero-latency local execution)
-
-## Team — Kinrei-X
-
-| Member | GitHub | Role & Contributions |
-| :--- | :--- | :--- |
-| **Gias Uddin Muntasir Rifat** | `@Kinrei-R` | Team Lead, ML Modeling & Feature Engineering (`src/features.py`, `src/train.py`, `src/inference.py`), FastAPI Backend (`app.py`), Interactive What-If Simulator |
-| **Fabiha Belal** | `@FabihaBelal` | Documentation (`README.md`), Validation & Metric Analysis, Exploratory Data Verification |
-| **Syed Tihan** | `@Syed-Tihan` | System Architecture (`ARCHITECTURE.md`), Limitations & Production Roadmap, QA Testing |
-
-## Tech Stack
-
-- **Language:** Python 3.10+
-- **Machine Learning & Data Processing:** `scikit-learn` (`HistGradientBoostingRegressor` with Poisson & Quantile losses), `pandas`, `numpy`, `joblib`, `openpyxl`
-- **Backend & API:** `FastAPI`, `Uvicorn`, `Pydantic` (with `GZipMiddleware` and HTTP `Cache-Control`)
-- **Frontend & Visualization:** Vanilla HTML5, CSS3, JavaScript (ES6+), custom inline SVG charts (zero external CDN or chart library dependencies)
-- **Hosting & Version Control:** Git / GitHub, Render Web Service
-
-## Setup & Run Instructions (Under 3 Minutes)
-
-Requires **Python 3.10+**. **No `.env` file, API keys, or environment variables are required.**
+## Setup
 
 ```bash
-git clone https://github.com/Kinrei-R/Hackathon.git
-
-python -m venv .venv
-
-# Linux / macOS:
-source .venv/bin/activate
-# Windows (PowerShell):
-.venv\Scripts\Activate.ps1
-
+python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python app.py
 ```
 
-Open **http://127.0.0.1:8000** in your browser.
+Trained artifacts are included in `artifacts/`. To retrain from the workbook (about 1 minute):
 
-Pre-trained horizon-specialized models are committed in `models/`, so the dashboard launches immediately with no mandatory training step. If artifacts are missing or saved under a different `scikit-learn` version, `app.py` automatically retrains once on startup (~23 seconds).
-- **Manual retraining:** `python -m src.train`
-- **Run lag & zero-leakage tests:** `python -m tests.test_pipeline`
-
-## Dashboard Capabilities
-
-- **Ward Risk Heatmap & Ranked Triage Board:** Select any forecast origin week (slider, step buttons, or presets such as *Peak 2025*), lead time (**2, 3, or 4 weeks**), and City Corporation filter to inspect all 60 wards color-coded by risk tier alongside expected cases, 80% prediction intervals (`q10`–`q90`), and worst-case tier escalation.
-- **Ward Detail & Exact Shapley Driver Breakdown:** Click any ward to inspect its 2–4 week forecast fan, 16-week historical case and rainfall trend, local weather readings vs. typical baseline, and exact **Shapley value driver attributions** across 8 grouped factors.
-- **Interactive What-If Weather Simulator:** Adjust rainfall (`0–350 mm`), temperature (`12–42 °C`), and humidity (`30–100 %`) sliders for any ward to dynamically simulate how shifting monsoon conditions alter predicted cases, risk tier, and Shapley drivers in real time.
-- **Model Validation & Calibration Tab:** Inspect out-of-sample chronological hold-out metrics (`2024–2025`), baseline comparisons, per-horizon accuracy (`h = 2, 3, 4`), predicted-vs-actual time series, 4×4 tier confusion matrices, and empirical rainfall-to-cases lag correlations.
-
-## Held-Out Test Results (2024–2025 Targets, 18,900 Ward-Weeks)
-
-| Model / Baseline | MAE | RMSE |
-| :--- | :---: | :---: |
-| **Horizon-Specialized Poisson HGB (This Model)** | **1.071** | **2.110** |
-| Ward seasonal average | 1.259 | 2.453 |
-| Last week's cases carried forward (persistence) | 1.861 | 3.582 |
-
-- **$R^2$:** `0.720` | **Exact Tier Accuracy:** `78.9%` | **Within ±1 Tier:** `99.2%`
-- **High/Critical Recall:** `59.5%` | **High/Critical Precision:** `60.3%`
-- **80% Interval Coverage (`q10`–`q90`):** `94.0%` (well-calibrated conservative uncertainty bounds)
-
-## Repository Layout
-
-```text
-app.py                  FastAPI server (REST API + static dashboard host)
-src/features.py         Per-ward multi-week lag & biological breeding synergy pipeline
-src/train.py            Chronological split, horizon-specialized Poisson & quantile training
-src/inference.py        Cached inference, risk tiering, What-If simulator, exact Shapley drivers
-static/                 index.html, styles.css, app.js (vanilla JS, inline SVG charts)
-models/                 Serialized joblib models, feature store, model_metadata.json
-data/                   hackathon_preli_dataset.xlsx
-tests/                  Lag correctness and zero-leakage verification tests
-ARCHITECTURE.md         System data flow diagram, chronological split, model rationale, cost controls
+```bash
+python -m src.train
 ```
 
-## API Endpoints
+## Run
 
-| Method & Endpoint | Purpose |
-| :--- | :--- |
-| `GET /api/bootstrap` | Available origin weeks, cities, wards, and calibrated tier thresholds |
-| `GET /api/forecast?origin=2025-08-04&horizon=3&city=` | Risk tier, expected cases, and 80% interval for all 60 wards |
-| `GET /api/ward/{ward_id}?origin=&horizon=` | 2–4 week forecast fan, Shapley drivers, key readings, and history |
-| `POST /api/simulate` | Live What-If weather scenario simulation for a selected ward |
-| `GET /api/validation` | Chronological hold-out metrics, baselines, confusion matrices, and lag evidence |
-| `POST /api/retrain` | Re-ingest updated dataset, retrain models, and hot-reload predictor |
+```bash
+uvicorn app:app --host 127.0.0.1 --port 8000
+python generate_exports.py        # writes exports/ (SMS, WhatsApp, 2 commissioner briefs)
+```
 
-## AI Tools & APIs Disclosure
+Open http://127.0.0.1:8000 for the overview page and http://127.0.0.1:8000/app for the command center.
 
-- **Claude (Anthropic):** Used during initial development to scaffold the multi-week lag feature pipeline, baseline training/validation scripts, unit test suite, and initial documentation structure. All generated code was reviewed, tested, and modified by the team.
-- **Google Gemini:** Used for model optimization (horizon-specialized models for $h \in \{2, 3, 4\}$ and biological *Aedes* breeding interaction features), adding the live What-If weather simulator (`POST /api/simulate`) and hot-reload retraining endpoint (`POST /api/retrain`), frontend polish, and rubric verification.
-- **External APIs & Model Endpoints:** None. No LLM endpoints, paid APIs, or external network calls are used during training or runtime inference (`$0.00` operational API/token cost).
+## Layout
 
-## Attributions
+```
+app.py                  FastAPI routes + kill-switch stress test
+generate_exports.py     sample dispatch exports
+src/features.py         lags 0-8 (rain, temp, humidity), interactions, seasonality
+src/train.py            chronological HistGradientBoosting: Poisson mean + q10/q90, h = 2, 3, 4
+src/inference.py        forecasts, ML counterfactual effects, precomputed fallback
+src/operations.py       demand, allocation, bed routing, simulator, dispatch templates
+static/                 landing.html/css/js (overview), index.html + styles.css + app.js (command center), all local
+tests/                  pytest suite: allocation, routing, simulator, fallback engine, API
+artifacts/              .joblib models, forecasts, effects, metadata
+data/                   bangladesh_dengue_large_dataset_onsite.xlsx
+exports/                generated samples
+```
 
-- **Dataset:** `data/hackathon_preli_dataset.xlsx` provided by the EDU AI Engineering Hackathon 2026 organizers.
-- **Open-Source Libraries:** Built with `scikit-learn`, `pandas`, `numpy`, `FastAPI`, `Uvicorn`, `joblib`, and `openpyxl` under their respective open-source (BSD/MIT) licenses.
-- **Frontend Assets & Visualizations:** All HTML/CSS styling, interactive heatmap boards, forecast fans, and SVG charts in `static/` were built from scratch by the team with no external templates, icon fonts, or third-party charting libraries.
+## Test
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q          # API tests are skipped automatically if fastapi/httpx are missing
+```
+
+## Dataset
+
+31,320 rows, 60 wards, 5 cities, 522 weeks (2016-01-04 to 2025-12-29). Weekly `dengue_cases`: median 0, p90 9, max 41.
+
+## Command center walkthrough
+
+| Control / panel | What it does |
+|---|---|
+| Scenario | Peak-season replay (origin 2025-06-09, out-of-sample models) or Live (origin 2025-12-29, off-season, near-zero forecast) |
+| Regional stock 30%-100% | Per-city saline and kit pools; wards served in priority order until empty |
+| Spraying crews 10-120 | Global crew pool, same priority order |
+| Outbreak surge 1x-4x | Scales forecasts to stress allocation and bed routing |
+| Ward risk heatmap | Tile color = priority rank; red base edge = CRITICAL DEFICIT |
+| Allocation table | Allocated / required per resource, exact shortfalls |
+| Bed routing | Transfer manifest, city utilization, unmet beds (same-city only) |
+| Vector simulator | 0-3 crews per ward or auto-assign; cases prevented, beds freed, saline saved, ROI; all 60 wards ranked |
+| Dispatch preview | SMS (<= 160), WhatsApp brief, printable commissioner brief |
+| Color heatmap by | Priority rank, or expected cases per week (honest in quiet seasons) |
+| KPI strip and selected-ward panel | Fill rates, deficits, unmet beds; forecast range chart, supply and bed routing for the chosen ward |
+| Download CSV | Allocation table for the current filters |
+| Offline kill-switch and stress test | Runs the whole pipeline with every outbound connection blocked, then reports 9 checks |
+
+Tip: set surge to 1.5x to see transfers and unmet beds together.
+
+## API
+
+`GET /` overview page | `GET /app` command center | `GET /api/health` | `GET /api/status` | `GET /api/forecast` | `GET /api/operations` | `GET /api/routing` | `POST /api/vector-simulate` | `GET /api/dispatch/{ward_id}` | `GET /api/dispatch/{ward_id}/brief` | `GET /api/stress-test`
+
+## Verify offline
+
+1. Turn Wi-Fi off, start the server, click **Offline kill-switch and stress test**: expect PASS on all checks.
+2. `grep -rEn "https?://" static/` returns nothing.
+3. DevTools, Network tab: all requests go to 127.0.0.1.
+
+## Git convention
+
+Every commit message must contain `version-onsite-final`:
+
+```bash
+git add -A
+git commit -m "feat: phase 2 dispatch engine [version-onsite-final]"
+```
+
+## Front-end notes
+
+- Controls are remembered in the browser (localStorage, optional) and `Reset controls` restores defaults.
+- Responses use a strict Content-Security-Policy (`default-src 'self'`), so a stray CDN link would be blocked as well as caught by the stress test.
+- Out-of-order responses are discarded, so dragging a slider quickly never shows stale numbers.
+- `/app#stress` opens the stress test directly.
+
+## Known limits
+
+- Live scenario forecasts are near zero because the dataset ends in the off-season; use the peak replay for demonstrations.
+- q10-q90 intervals cover about 92-93% of holdout weeks (zero-inflated counts make them wider than 80%).
+- The counterfactual uses a model-driven path and a deterministic fallback; effects are modeled, not measured field results.
+
+## AI Disclosure
+
+- Parts of this code and documentation were drafted with Claude (Anthropic), then run and checked by the authors.
+- No AI service is called at runtime. Forecasts come from locally trained scikit-learn models; dispatch text comes from fixed templates.
+- Outputs are decision support, not medical or operational orders. Qualified public-health staff must review them before action.
+- The human authors remain responsible for the data, code, and results.

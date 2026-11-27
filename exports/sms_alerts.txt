@@ -1,0 +1,60 @@
+DENGUE DSCC_Ward_04: 25 cases/wk. Saline 60/60 Kits 29/29 Crews 4/4. Supply OK. Send 3 pts to DSCC_Ward_01
+DENGUE CCC_Ward_03: 18 cases/wk. Saline 43/43 Kits 21/21 Crews 3/3. Supply OK. Send 1 pts to CCC_Ward_05
+DENGUE DNCC_Ward_19: 20 cases/wk. Saline 48/48 Kits 24/24 Crews 3/3. Supply OK.
+DENGUE CCC_Ward_01: 19 cases/wk. Saline 46/46 Kits 22/22 Crews 3/3. Supply OK. Send 1 pts to CCC_Ward_02
+DENGUE DSCC_Ward_06: 19 cases/wk. Saline 46/46 Kits 22/22 Crews 3/3. Supply OK.
+DENGUE DSCC_Ward_10: 22 cases/wk. Saline 53/53 Kits 26/26 Crews 3/3. Supply OK. Send 2 pts to DSCC_Ward_15
+DENGUE NCC_Ward_05: 22 cases/wk. Saline 53/53 Kits 26/26 Crews 3/3. Supply OK.
+DENGUE DNCC_Ward_12: 19 cases/wk. Saline 46/46 Kits 22/22 Crews 3/3. Supply OK.
+DENGUE GCC_Ward_02: 18 cases/wk. Saline 43/43 Kits 21/21 Crews 3/3. Supply OK.
+DENGUE DNCC_Ward_18: 21 cases/wk. Saline 50/50 Kits 25/25 Crews 3/3. Supply OK. Send 2 pts to DNCC_Ward_17
+DENGUE GCC_Ward_03: 17 cases/wk. Saline 41/41 Kits 20/20 Crews 3/3. Supply OK.
+DENGUE DNCC_Ward_09: 17 cases/wk. Saline 41/41 Kits 20/20 Crews 3/3. Supply OK. Send 1 pts to DNCC_Ward_14
+DENGUE GCC_Ward_01: 17 cases/wk. Saline 31/41 Kits 15/20 Crews 3/3. CRITICAL DEFICIT: saline 10 kits 5.
+DENGUE DSCC_Ward_12: 17 cases/wk. Saline 41/41 Kits 20/20 Crews 0/3. CRITICAL DEFICIT: crews 3.
+DENGUE GCC_Ward_05: 15 cases/wk. Saline 0/36 Kits 0/18 Crews 0/2. CRITICAL DEFICIT: saline 36 kits 18 crews 2.
+DENGUE DSCC_Ward_19: 17 cases/wk. Saline 41/41 Kits 20/20 Crews 0/3. CRITICAL DEFICIT: crews 3.
+DENGUE NCC_Ward_01: 15 cases/wk. Saline 36/36 Kits 18/18 Crews 0/2. CRITICAL DEFICIT: crews 2.
+DENGUE DNCC_Ward_10: 14 cases/wk. Saline 34/34 Kits 17/17 Crews 0/2. CRITICAL DEFICIT: crews 2.
+DENGUE CCC_Ward_04: 16 cases/wk. Saline 39/39 Kits 19/19 Crews 0/2. CRITICAL DEFICIT: crews 2. Send 1 pts to CCC_Ward_09
+DENGUE DSCC_Ward_13: 14 cases/wk. Saline 34/34 Kits 17/17 Crews 0/2. CRITICAL DEFICIT: crews 2.
+DENGUE DSCC_Ward_08: 13 cases/wk. Saline 31/31 Kits 15/15 Crews 0/2. CRITICAL DEFICIT: crews 2.
+DENGUE DNCC_Ward_01: 16 cases/wk. Saline 38/38 Kits 19/19 Crews 0/2. CRITICAL DEFICIT: crews 2. Send 1 pts to DNCC_Ward_06
+DENGUE DNCC_Ward_05: 13 cases/wk. Saline 31/31 Kits 15/15 Crews 0/2. CRITICAL DEFICIT: crews 2.
+DENGUE CCC_Ward_07: 17 cases/wk. Saline 41/41 Kits 20/20 Crews 0/3. CRITICAL DEFICIT: crews 3. Send 1 pts to CCC_Ward_10
+DENGUE DSCC_Ward_03: 14 cases/wk. Saline 34/34 Kits 17/17 Crews 0/2. CRITICAL DEFICIT: crews 2. Send 1 pts to DSCC_Ward_17
+DENGUE DNCC_Ward_11: 13 cases/wk. Saline 31/31 Kits 15/15 Crews 0/2. CRITICAL DEFICIT: crews 2.
+DENGUE GCC_Ward_04: 13 cases/wk. Saline 0/31 Kits 0/15 Crews 0/2. CRITICAL DEFICIT: saline 31 kits 15 crews 2.
+DENGUE DSCC_Ward_20: 14 cases/wk. Saline 34/34 Kits 17/17 Crews 0/2. CRITICAL DEFICIT: crews 2.
+DENGUE DNCC_Ward_02: 12 cases/wk. Saline 29/29 Kits 14/14 Crews 0/2. CRITICAL DEFICIT: crews 2.
+DENGUE DNCC_Ward_15: 13 cases/wk. Saline 31/31 Kits 15/15 Crews 0/2. CRITICAL DEFICIT: crews 2.
+DENGUE DNCC_Ward_03: 15 cases/wk. Saline 3/36 Kits 1/18 Crews 0/2. CRITICAL DEFICIT: saline 33 kits 17 crews 2. Send 1 pts to DNCC_Ward_13
+DENGUE DNCC_Ward_16: 11 cases/wk. Saline 0/27 Kits 0/13 Crews 0/2. CRITICAL DEFICIT: saline 27 kits 13 crews 2.
+DENGUE DSCC_Ward_18: 14 cases/wk. Saline 20/34 Kits 10/17 Crews 0/2. CRITICAL DEFICIT: saline 14 kits 7 crews 2.
+DENGUE CCC_Ward_08: 12 cases/wk. Saline 22/29 Kits 11/14 Crews 0/2. CRITICAL DEFICIT: saline 7 kits 3 crews 2.
+DENGUE DNCC_Ward_07: 11 cases/wk. Saline 0/27 Kits 0/13 Crews 0/2. CRITICAL DEFICIT: saline 27 kits 13 crews 2.
+DENGUE NCC_Ward_04: 11 cases/wk. Saline 13/27 Kits 5/13 Crews 0/2. CRITICAL DEFICIT: saline 14 kits 8 crews 2.
+DENGUE CCC_Ward_06: 11 cases/wk. Saline 0/27 Kits 0/13 Crews 0/2. CRITICAL DEFICIT: saline 27 kits 13 crews 2.
+DENGUE DSCC_Ward_11: 12 cases/wk. Saline 0/29 Kits 0/14 Crews 0/2. CRITICAL DEFICIT: saline 29 kits 14 crews 2.
+DENGUE DSCC_Ward_09: 12 cases/wk. Saline 0/29 Kits 0/14 Crews 0/2. CRITICAL DEFICIT: saline 29 kits 14 crews 2.
+DENGUE DSCC_Ward_02: 11 cases/wk. Saline 0/27 Kits 0/13 Crews 0/2. CRITICAL DEFICIT: saline 27 kits 13 crews 2.
+DENGUE CCC_Ward_10: 10 cases/wk. Saline 0/24 Kits 0/12 Crews 0/2. CRITICAL DEFICIT: saline 24 kits 12 crews 2. Receive 1 pts
+DENGUE NCC_Ward_03: 11 cases/wk. Saline 0/27 Kits 0/13 Crews 0/2. CRITICAL DEFICIT: saline 27 kits 13 crews 2.
+DENGUE DNCC_Ward_14: 10 cases/wk. Saline 0/24 Kits 0/12 Crews 0/2. CRITICAL DEFICIT: saline 24 kits 12 crews 2. Receive 1 pts
+DENGUE DNCC_Ward_08: 11 cases/wk. Saline 0/27 Kits 0/13 Crews 0/2. CRITICAL DEFICIT: saline 27 kits 13 crews 2.
+DENGUE DSCC_Ward_05: 11 cases/wk. Saline 0/27 Kits 0/13 Crews 0/2. CRITICAL DEFICIT: saline 27 kits 13 crews 2.
+DENGUE DSCC_Ward_15: 10 cases/wk. Saline 0/24 Kits 0/12 Crews 0/2. CRITICAL DEFICIT: saline 24 kits 12 crews 2. Receive 1 pts
+DENGUE DNCC_Ward_04: 11 cases/wk. Saline 0/27 Kits 0/13 Crews 0/2. CRITICAL DEFICIT: saline 27 kits 13 crews 2.
+DENGUE DSCC_Ward_16: 10 cases/wk. Saline 0/24 Kits 0/12 Crews 0/2. CRITICAL DEFICIT: saline 24 kits 12 crews 2. Receive 1 pts
+DENGUE DSCC_Ward_01: 10 cases/wk. Saline 0/24 Kits 0/12 Crews 0/2. CRITICAL DEFICIT: saline 24 kits 12 crews 2. Receive 1 pts
+DENGUE DNCC_Ward_06: 10 cases/wk. Saline 0/24 Kits 0/12 Crews 0/2. CRITICAL DEFICIT: saline 24 kits 12 crews 2. Receive 1 pts
+DENGUE NCC_Ward_02: 11 cases/wk. Saline 0/27 Kits 0/13 Crews 0/2. CRITICAL DEFICIT: saline 27 kits 13 crews 2.
+DENGUE DSCC_Ward_17: 9 cases/wk. Saline 0/22 Kits 0/11 Crews 0/2. CRITICAL DEFICIT: saline 22 kits 11 crews 2. Receive 1 pts
+DENGUE DNCC_Ward_17: 9 cases/wk. Saline 0/22 Kits 0/11 Crews 0/2. CRITICAL DEFICIT: saline 22 kits 11 crews 2. Receive 1 pts
+DENGUE CCC_Ward_02: 10 cases/wk. Saline 0/24 Kits 0/12 Crews 0/2. CRITICAL DEFICIT: saline 24 kits 12 crews 2. Receive 1 pts
+DENGUE CCC_Ward_09: 10 cases/wk. Saline 0/24 Kits 0/12 Crews 0/2. CRITICAL DEFICIT: saline 24 kits 12 crews 2. Receive 1 pts
+DENGUE DNCC_Ward_20: 9 cases/wk. Saline 0/22 Kits 0/11 Crews 0/2. CRITICAL DEFICIT: saline 22 kits 11 crews 2. Receive 1 pts
+DENGUE DSCC_Ward_07: 9 cases/wk. Saline 0/22 Kits 0/11 Crews 0/2. CRITICAL DEFICIT: saline 22 kits 11 crews 2. Receive 1 pts
+DENGUE DNCC_Ward_13: 9 cases/wk. Saline 0/22 Kits 0/11 Crews 0/2. CRITICAL DEFICIT: saline 22 kits 11 crews 2. Receive 1 pts
+DENGUE CCC_Ward_05: 9 cases/wk. Saline 0/22 Kits 0/11 Crews 0/2. CRITICAL DEFICIT: saline 22 kits 11 crews 2. Receive 1 pts
+DENGUE DSCC_Ward_14: 9 cases/wk. Saline 0/22 Kits 0/11 Crews 0/2. CRITICAL DEFICIT: saline 22 kits 11 crews 2. Receive 1 pts

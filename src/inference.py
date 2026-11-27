@@ -1,325 +1,116 @@
-"""Fast local inference: serialized horizon-specialized models, feature store, driver attribution.
+"""Inference: forecasts (mean, q10, q90) for t+2..t+4 and model-driven counterfactual effects.
 
-No network calls, no paid APIs. A full 60-ward forecast is three vectorised
-`predict` calls on a 60-row matrix (a few milliseconds) and is memoised.
+If serialized models cannot be loaded, the engine falls back to precomputed
+forecasts.csv / effects.json (fully deterministic, no sklearn needed at runtime).
 """
-from __future__ import annotations
-
 import json
-from functools import lru_cache
-from math import factorial
 from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
 
-from .features import FEATURE_COLS, FEATURE_GROUPS, HORIZONS, add_horizon
+from .features import add_interactions
+from .operations import K_MAX, WEIGHTS, intervene, fallback_factor
 
-ROOT = Path(__file__).resolve().parents[1]
-MODELS = ROOT / "models"
-TIERS = ["Low", "Medium", "High", "Critical"]
-HISTORY_WEEKS = 16
-SHAP_BG = 40
-_M = len(FEATURE_GROUPS)
-_SHAP_W = [factorial(k) * factorial(_M - k - 1) / factorial(_M) for k in range(_M)]
+KINDS = ("mean", "q10", "q90")
 
 
-def models_ready() -> bool:
-    need = ["dengue_model.joblib", "dengue_q10.joblib", "dengue_q90.joblib", "feature_store.joblib", "model_metadata.json"]
-    return all((MODELS / n).exists() for n in need)
+class Engine:
+    def __init__(self, art="artifacts", scenario="live"):
+        """scenario 'live': newest data, final models. 'peak': out-of-sample replay at the holdout peak week."""
+        self.art, self.scenario = Path(art), scenario
+        self.tag = "" if scenario == "live" else "_peak"
+        mdir = "models" if scenario == "live" else "models_holdout"
+        self.meta = json.loads((self.art / "meta.json").read_text())
+        self.as_of = self.meta["as_of"] if scenario == "live" else self.meta["peak_origin"]
+        self.hz = self.meta["horizons"]
+        self.cols = self.meta["features"]
+        self.wards = {w["ward_id"]: w for w in self.meta["wards"]}
+        self.ward_ids = sorted(self.wards)
+        self.models, self.latest, self.mode = None, None, "precomputed"
+        try:
+            self.latest = joblib.load(self.art / f"latest{self.tag}.joblib")
+            self.models = {(h, k): joblib.load(self.art / mdir / f"h{h}_{k}.joblib")
+                           for h in self.hz for k in KINDS}
+            self.mode = "ml"
+        except Exception:
+            self.models = None
+        self._fc, self._fx = None, None
 
+    # ---- forecasts -------------------------------------------------------
+    def _predict(self, X):
+        out = {}
+        for h in self.hz:
+            mean = np.maximum(self.models[(h, "mean")].predict(X[self.cols]), 0)
+            lo = np.minimum(np.maximum(self.models[(h, "q10")].predict(X[self.cols]), 0), mean)
+            hi = np.maximum(self.models[(h, "q90")].predict(X[self.cols]), mean)
+            out[h] = (mean, lo, hi)
+        return out
 
-class Predictor:
-    def __init__(self) -> None:
-        self.meta = json.loads((MODELS / "model_metadata.json").read_text())
-        self.mean = joblib.load(MODELS / "dengue_model.joblib")
-        self.q10 = joblib.load(MODELS / "dengue_q10.joblib")
-        self.q90 = joblib.load(MODELS / "dengue_q90.joblib")
-        if not isinstance(self.mean, dict):
-            raise RuntimeError("Legacy single-model artifact detected; trigger retrain.")
-        store = joblib.load(MODELS / "feature_store.joblib")
-        self.panel: pd.DataFrame = store["panel"]
-        self.wards: pd.DataFrame = store["wards"].set_index("ward_id")
-        self.bg: pd.DataFrame = store["background"]
-        self.thr: list[float] = self.meta["tiers"]["thresholds_cases_per_ward_week"]
-        self.origins = sorted(self.panel["date"].unique())
-        self.origin_strs = [pd.Timestamp(d).strftime("%Y-%m-%d") for d in self.origins]
-        self._by_date = {pd.Timestamp(d): g.reset_index(drop=True) for d, g in self.panel.groupby("date")}
-        self._group_idx = {g: [FEATURE_COLS.index(c) for c in cols] for g, cols in FEATURE_GROUPS.items()}
-        self._bg_mat = self.bg[FEATURE_COLS].to_numpy(dtype=np.float64)
-        self._bg_mean = self.bg.mean()
-        self._explain_cache: dict = {}
+    def forecast_df(self):
+        if self._fc is not None:
+            return self._fc
+        if self.models:
+            pred = self._predict(self.latest)
+            df = pd.DataFrame({f"h{h}_{n}": pred[h][i] for h in self.hz for i, n in enumerate(("mean", "lo", "hi"))},
+                              index=self.latest.index)
+        else:
+            df = pd.read_csv(self.art / f"forecasts{self.tag}.csv", index_col="ward_id")
+        df = df.loc[self.ward_ids]
+        df["expected"] = df[[f"h{h}_mean" for h in self.hz]].mean(axis=1)
+        df["upper"] = df[[f"h{h}_hi" for h in self.hz]].mean(axis=1)
+        self._fc = df
+        return df
 
-    # ---------- tiers ----------
-    def tier(self, cases: float) -> str:
-        return TIERS[int(np.searchsorted(self.thr, cases, side="right"))]
+    def target_dates(self):
+        t0 = pd.Timestamp(self.as_of)
+        return {h: str((t0 + pd.Timedelta(weeks=h)).date()) for h in self.hz}
 
-    def score(self, cases: float) -> float:
-        t = self.thr
-        return float(np.interp(cases, [0, t[0], t[1], t[2], 2 * t[2]], [0, 25, 50, 75, 100]))
+    # ---- counterfactual effects -----------------------------------------
+    def effects(self):
+        """{ward: {"delta": [k][h] cases averted per horizon, "src": [k][h] 'ml'|'fallback'}}"""
+        if self._fx is not None:
+            return self._fx
+        fp = self.art / f"effects{self.tag}.json"
+        if not self.models and fp.exists():
+            self._fx = json.loads(fp.read_text())
+            return self._fx
+        fc = self.forecast_df()
+        ml = {}
+        if self.models:
+            for k in range(K_MAX + 1):
+                X = self.latest.copy()
+                wl, s = intervene(X["water_logging_risk_index"], X["sanitation_score"], k)
+                X["water_logging_risk_index"], X["sanitation_score"] = wl, s
+                ml[k] = self._predict(add_interactions(X))
+        idx = {w: i for i, w in enumerate(self.latest.index)} if self.models else {}
+        fx = {}
+        for w in self.ward_ids:
+            info = self.wards[w]
+            delta, src = [], []
+            for k in range(K_MAX + 1):
+                wl2, s2 = intervene(info["wl"], info["san"], k)
+                fac = fallback_factor(info["wl"], info["san"], wl2, s2)
+                drow, srow = [], []
+                for h in self.hz:
+                    base = float(fc.loc[w, f"h{h}_mean"])
+                    d_fb = base * (1 - fac)
+                    d_ml = base - float(ml[k][h][0][idx[w]]) if self.models else 0.0
+                    if k > 0 and d_ml > 0:
+                        drow.append(min(d_ml, base)); srow.append("ml")
+                    else:
+                        drow.append(d_fb if k > 0 else 0.0); srow.append("fallback")
+                delta.append(drow); src.append(srow)
+            fx[w] = {"delta": delta, "src": src}
+        self._fx = fx
+        return fx
 
-    def snap_origin(self, origin: str | None) -> pd.Timestamp:
-        if not origin:
-            return pd.Timestamp(self.origins[-1])
-        ts = pd.Timestamp(origin)
-        ok = [d for d in self.origins if d <= np.datetime64(ts)]
-        return pd.Timestamp(ok[-1] if ok else self.origins[0])
-
-    # ---------- forecasts ----------
-    def _frame(self, origin: pd.Timestamp, h: int) -> pd.DataFrame:
-        return add_horizon(self._by_date[origin], h)
-
-    @lru_cache(maxsize=512)
-    def _forecast_cached(self, origin_str: str, h: int) -> tuple:
-        origin = pd.Timestamp(origin_str)
-        fr = self._frame(origin, h)
-        X = fr[FEATURE_COLS]
-        p = np.clip(self.mean[h].predict(X), 0, None)
-        lo = np.minimum(np.clip(self.q10[h].predict(X), 0, None), p)
-        hi = np.maximum(self.q90[h].predict(X), p)
-        rows = []
-        for i, r in fr.iterrows():
-            w = self.wards.loc[r.ward_id]
-            actual = None if np.isnan(r.y) else float(r.y)
-            rows.append({
-                "ward_id": r.ward_id, "city": r.city, "predicted_cases": round(float(p[i]), 2),
-                "low": round(float(lo[i]), 2), "high": round(float(hi[i]), 2),
-                "tier": self.tier(p[i]), "worst_case_tier": self.tier(hi[i]), "risk_score": round(self.score(p[i]), 1),
-                "actual_cases": actual, "actual_tier": None if actual is None else self.tier(actual),
-                "water_logging_risk_index": float(w.water_logging_risk_index),
-                "sanitation_score": float(w.sanitation_score),
-                "population_density_sqkm": int(w.population_density_sqkm),
-            })
-        return tuple(rows), fr["target_date"].iloc[0].strftime("%Y-%m-%d")
-
-    def forecast(self, origin: str | None, h: int, city: str | None = None) -> dict:
-        o = self.snap_origin(origin)
-        rows, target = self._forecast_cached(o.strftime("%Y-%m-%d"), int(h))
-        rows = [r for r in rows if not city or city == "All cities" or r["city"] == city]
-        counts = {t: 0 for t in TIERS}
-        for r in rows:
-            counts[r["tier"]] += 1
-        return {
-            "origin": o.strftime("%Y-%m-%d"),
-            "target_date": target,
-            "horizon_weeks": int(h),
-            "is_latest": o == pd.Timestamp(self.origins[-1]),
-            "tier_counts": counts,
-            "wards": sorted(rows, key=lambda r: -r["predicted_cases"]),
-        }
-
-    # ---------- driver breakdown ----------
-    def _explain(self, row: pd.DataFrame, h: int) -> list[dict]:
-        """Exact Shapley values over feature groups for horizon h."""
-        x = row[FEATURE_COLS].to_numpy(dtype=np.float64)[0]
-        bg = self._bg_mat[:SHAP_BG]
-        n, groups = len(bg), list(self._group_idx)
-        m = len(groups)
-        blocks = []
-        for mask in range(1 << m):
-            M = bg.copy()
-            for gi, g in enumerate(groups):
-                if mask >> gi & 1:
-                    M[:, self._group_idx[g]] = x[self._group_idx[g]]
-            blocks.append(M)
-        preds = self.mean[h].predict(pd.DataFrame(np.vstack(blocks), columns=FEATURE_COLS))
-        v = preds.reshape(1 << m, n).mean(axis=1)
-        phi = np.zeros(m)
-        for mask in range(1 << m):
-            k = bin(mask).count("1")
-            for gi in range(m):
-                if not mask >> gi & 1:
-                    phi[gi] += _SHAP_W[k] * (v[mask | 1 << gi] - v[mask])
-
-        raw_map = dict(zip(groups, phi))
-        merged = {
-            "Multi-week rainfall (2-4w breeding lag)": raw_map.get("Rainfall 2-4 weeks ago (breeding window)", 0.0)
-            + raw_map.get("Cumulative rainfall", 0.0),
-            "Ward vulnerability & breeding synergy": raw_map.get("Ward vulnerability & breeding synergy", 0.0),
-            "Recent rainfall (0-1 weeks ago)": raw_map.get("Rainfall 0-1 weeks ago", 0.0),
-            "Earlier rainfall (5-8 weeks ago)": raw_map.get("Rainfall 5-8 weeks ago", 0.0),
-            "Temperature": raw_map.get("Temperature", 0.0),
-            "Humidity": raw_map.get("Humidity", 0.0),
-            "Seasonality & lead time": raw_map.get("Time of year and lead time", 0.0),
-        }
-        out = [{"driver": g, "contribution": round(float(val), 3)} for g, val in merged.items()]
-        return sorted(out, key=lambda d: -abs(d["contribution"]))
-
-    def _explain_cached(self, ward_id: str, origin: str, h: int, row: pd.DataFrame) -> list[dict]:
-        key = (ward_id, origin, h)
-        if key not in self._explain_cache:
-            if len(self._explain_cache) > 2000:
-                self._explain_cache.clear()
-            self._explain_cache[key] = self._explain(row, h)
-        return self._explain_cache[key]
-
-    def _facts(self, row: pd.DataFrame) -> list[dict]:
-        r = row.iloc[0]
-        b = self._bg_mean
-        rain_win = float(r.rain_lag_2 + r.rain_lag_3 + r.rain_lag_4)
-        bg_win = float(b.rain_lag_2 + b.rain_lag_3 + b.rain_lag_4)
-        return [
-            {"label": "Rain 2-4 weeks ago (total)", "value": round(rain_win, 1), "typical": round(bg_win, 1), "unit": "mm"},
-            {"label": "Rain, last 4 weeks", "value": round(float(r.rain_sum_4w), 1), "typical": round(float(b.rain_sum_4w), 1), "unit": "mm"},
-            {"label": "Mean temperature, last 4 weeks", "value": round(float(r.temp_mean_4w), 1), "typical": round(float(b.temp_mean_4w), 1), "unit": "C"},
-            {"label": "Mean humidity, last 4 weeks", "value": round(float(r.hum_mean_4w), 1), "typical": round(float(b.hum_mean_4w), 1), "unit": "%"},
-            {"label": "Water-logging risk index", "value": round(float(r.water_logging_risk_index), 2), "typical": round(float(b.water_logging_risk_index), 2), "unit": ""},
-            {"label": "Sanitation score", "value": round(float(r.sanitation_score), 2), "typical": round(float(b.sanitation_score), 2), "unit": ""},
-        ]
-
-    # ---------- what-if custom weather simulator ----------
-    def simulate_ward(
-        self,
-        ward_id: str,
-        origin: str | None,
-        h: int,
-        rainfall_mm: float,
-        avg_temp_c: float,
-        humidity_pct: float,
-    ) -> dict:
-        if ward_id not in self.wards.index:
-            raise KeyError(ward_id)
-        h = int(h)
-        o = self.snap_origin(origin)
-        fr = self._frame(o, h)
-        row = fr[fr.ward_id == ward_id].copy().reset_index(drop=True)
-
-        r_val = float(np.clip(rainfall_mm, 0.0, 350.0))
-        t_val = float(np.clip(avg_temp_c, 12.0, 42.0))
-        h_val = float(np.clip(humidity_pct, 30.0, 100.0))
-
-        for k in range(5):
-            row[f"rain_lag_{k}"] = np.float32(r_val)
-        row["rain_sum_2w"] = np.float32(r_val * 2.0)
-        row["rain_sum_4w"] = np.float32(r_val * 4.0)
-        row["rain_breeding_win"] = np.float32(r_val * 3.0)
-        row["city_rain_breeding_win"] = np.float32(r_val * 3.0)
-        row["rain_momentum"] = np.float32(0.0)
-        older_rain = sum(float(row[f"rain_lag_{k}"].iloc[0]) for k in range(5, 9))
-        row["rain_sum_8w"] = np.float32(r_val * 5.0 + older_rain)
-        row["rain_max_4w"] = np.float32(r_val)
-        older_wet = sum(1.0 for k in range(5, 9) if float(row[f"rain_lag_{k}"].iloc[0]) > 50.0)
-        row["rain_wet_weeks_8w"] = np.float32((5.0 if r_val > 50.0 else 0.0) + older_wet)
-
-        for k in (0, 2, 4):
-            row[f"temp_lag_{k}"] = np.float32(t_val)
-            row[f"hum_lag_{k}"] = np.float32(h_val)
-        temp_delta = t_val - float(row["temp_mean_4w"].iloc[0])
-        row["temp_mean_4w"] = np.float32(t_val)
-        row["tmin_mean_4w"] = np.float32(float(row["tmin_mean_4w"].iloc[0]) + temp_delta)
-        row["hum_mean_4w"] = np.float32(h_val)
-        row["temp_opt_score"] = np.float32(np.exp(-0.5 * ((t_val - 28.5) / 3.5) ** 2))
-
-        # Recompute domain interactions consistently
-        row["stagnation_hazard"] = np.float32(float(row["rain_breeding_win"].iloc[0]) * float(row["water_logging_risk_index"].iloc[0]))
-        row["breeding_suitability_idx"] = np.float32(
-            float(row["rain_breeding_win"].iloc[0]) * float(row["temp_opt_score"].iloc[0]) * (h_val / 100.0)
-        )
-
-        X = row[FEATURE_COLS]
-        p = float(np.clip(self.mean[h].predict(X)[0], 0, None))
-        lo = float(min(np.clip(self.q10[h].predict(X)[0], 0, None), p))
-        hi = float(max(self.q90[h].predict(X)[0], p))
-        tier = self.tier(p)
-        worst_tier = self.tier(hi)
-        return {
-            "ward_id": ward_id,
-            "origin": o.strftime("%Y-%m-%d"),
-            "target_date": row["target_date"].iloc[0].strftime("%Y-%m-%d"),
-            "horizon_weeks": h,
-            "inputs": {"rainfall_mm": r_val, "avg_temp_c": t_val, "humidity_pct": h_val},
-            "predicted_cases": round(p, 2),
-            "low": round(lo, 2),
-            "high": round(hi, 2),
-            "tier": tier,
-            "worst_case_tier": worst_tier,
-            "risk_score": round(self.score(p), 1),
-            "drivers": self._explain(row, h),
-            "facts": self._facts(row),
-        }
-
-    def ward_detail(self, ward_id: str, origin: str | None, h: int) -> dict:
-        if ward_id not in self.wards.index:
-            raise KeyError(ward_id)
-        o = self.snap_origin(origin)
-        horizons = {}
-        for hh in HORIZONS:
-            rows, tdate = self._forecast_cached(o.strftime("%Y-%m-%d"), hh)
-            r = next(x for x in rows if x["ward_id"] == ward_id)
-            horizons[str(hh)] = {**r, "target_date": tdate}
-        row = self._frame(o, int(h))
-        row = row[row.ward_id == ward_id].reset_index(drop=True)
-
-        hist = self.panel[
-            (self.panel.ward_id == ward_id)
-            & (self.panel.date <= o)
-            & (self.panel.date > o - pd.Timedelta(weeks=HISTORY_WEEKS))
-        ]
-        history = [
-            {
-                "date": d.strftime("%Y-%m-%d"),
-                "cases": float(c),
-                "rain_mm": round(float(rn), 1),
-                "temp_c": round(float(t), 1),
-                "humidity_pct": round(float(hu), 1),
-            }
-            for d, c, rn, t, hu in zip(hist.date, hist.cases_lag_0, hist.rain_lag_0, hist.temp_lag_0, hist.hum_lag_0)
-        ]
-        later = self.panel[
-            (self.panel.ward_id == ward_id)
-            & (self.panel.date > o)
-            & (self.panel.date <= o + pd.Timedelta(weeks=4))
-        ]
-        realised = [{"date": d.strftime("%Y-%m-%d"), "cases": float(c)} for d, c in zip(later.date, later.cases_lag_0)]
-        w = self.wards.loc[ward_id]
-        r0 = row.iloc[0]
-        default_weather = {
-            "rainfall_mm": round(float(r0.rain_sum_4w) / 4.0, 1),
-            "avg_temp_c": round(float(r0.temp_mean_4w), 1),
-            "humidity_pct": round(float(r0.hum_mean_4w), 1),
-        }
-        return {
-            "ward_id": ward_id,
-            "city": w.city,
-            "origin": o.strftime("%Y-%m-%d"),
-            "horizon_weeks": int(h),
-            "static": {
-                "population_density_sqkm": int(w.population_density_sqkm),
-                "water_logging_risk_index": float(w.water_logging_risk_index),
-                "sanitation_score": float(w.sanitation_score),
-            },
-            "default_weather": default_weather,
-            "horizons": horizons,
-            "drivers": self._explain_cached(ward_id, o.strftime("%Y-%m-%d"), int(h), row),
-            "facts": self._facts(row),
-            "history": history,
-            "realised_after_origin": realised,
-        }
-
-    # ---------- metadata for UI ----------
-    def bootstrap(self) -> dict:
-        m = self.meta
-        wards = [{"ward_id": k, "city": v.city} for k, v in self.wards.iterrows()]
-        default_origin = "2025-08-04" if "2025-08-04" in self.origin_strs else self.origin_strs[-1]
-        return {
-            "origins": self.origin_strs,
-            "latest_origin": self.origin_strs[-1],
-            "default_origin": default_origin,
-            "cities": ["All cities"] + sorted(self.wards.city.unique()),
-            "wards": wards,
-            "horizons": m["horizons"],
-            "tiers": {"names": TIERS, "thresholds": self.thr},
-            "data_range": m["data_range"],
-            "trained_at": m["trained_at"],
-        }
-
-    def validation(self) -> dict:
-        m = self.meta
-        return {
-            "split": m["split"],
-            "model": m["model"],
-            "metrics": m["metrics"],
-            "lag_correlations": m["lag_correlations"],
-            "tiers": m["tiers"],
-        }
+    # ---- artifacts -------------------------------------------------------
+    @classmethod
+    def precompute(cls, art="artifacts", scenario="live"):
+        """Write forecasts + effects so the app works without model files."""
+        e = cls(art, scenario)
+        assert e.models, "models must load to precompute"
+        e.forecast_df().drop(columns=["expected", "upper"]).to_csv(Path(art) / f"forecasts{e.tag}.csv", index_label="ward_id")
+        (Path(art) / f"effects{e.tag}.json").write_text(json.dumps(e.effects()))
