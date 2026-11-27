@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dengue early warning for Bangladesh city wards</title>
+<meta name="description" content="Ward-level dengue forecasts, scarcity-aware supply allocation, hospital bed routing and ready-to-send alerts. Runs fully offline.">
+<link rel="icon" href="/static/logo.png">
+<link rel="stylesheet" href="/static/landing.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="hero" id="top">
+  <nav class="nav" aria-label="Primary">
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span>Kinrei EWS</a>
+    <div class="nav-links">
+      <a href="#decisions">What it decides</a>
+      <a href="#accuracy">Accuracy</a>
+      <a href="#offline">Offline proof</a>
+      <a class="btn btn-sm" href="/app">Open command center</a>
+    </div>
+  </nav>
+
+  <div class="hero-grid">
+    <div class="hero-copy">
+      <h1>See which wards dengue will reach in two to four weeks, and where to send supplies first.</h1>
+      <p class="lede">Forecasts, scarcity-aware allocation, hospital bed routing and ready-to-send alerts for 60 wards across five Bangladesh city corporations. It runs on one laptop with the network switched off.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="/app">Open command center</a>
+        <a class="btn btn-ghost" href="#offline">Run the offline test</a>
+      </div>
+      <dl class="facts" id="facts" aria-label="Key numbers">
+        <div><dt>Wards covered</dt><dd id="fWards">60</dd></div>
+        <div><dt>Weekly records learned from</dt><dd id="fRows">31,320</dd></div>
+        <div><dt>Less error than repeating last week</dt><dd id="fGain">40%</dd></div>
+      </dl>
+    </div>
+
+    <figure class="map" aria-labelledby="mapTitle">
+      <div class="map-head">
+        <figcaption id="mapTitle">Expected dengue cases per ward, per week</figcaption>
+        <div class="seg" role="group" aria-label="Forecast scenario">
+          <button type="button" data-sc="peak" aria-pressed="true">Peak season</button>
+          <button type="button" data-sc="live" aria-pressed="false">Today</button>
+        </div>
+      </div>
+      <div id="tileMap" class="tile-map" aria-live="polite"></div>
+      <div class="readout" id="readout" aria-live="polite">Hover or focus a ward to read its forecast.</div>
+      <div class="ramp" aria-hidden="true"><span>0</span><i class="c0"></i><i class="c1"></i><i class="c2"></i><i class="c3"></i><i class="c4"></i><i class="c5"></i><span>12 or more</span></div>
+      <p class="map-note" id="mapNote"></p>
+    </figure>
+  </div>
+</header>
+
+<main id="main">
+  <section class="band" id="decisions" aria-labelledby="hDec">
+    <div class="wrap">
+      <h2 id="hDec">Three decisions, made from the same forecast</h2>
+      <p class="intro">Every panel below is drawn from the model running on this machine right now, with stock cut to 40% and 30 spraying crews so the trade-offs show.</p>
+      <div class="lanes">
+        <article class="lane">
+          <h3>Where cases are heading</h3>
+          <p>Weeks 2 to 4 ahead for the ward at the top of the priority list, with the plausible range (10th to 90th percentile).</p>
+          <div id="chart" class="chart" role="img" aria-label="Forecast chart"></div>
+          <p class="cap" id="chartCap"></p>
+        </article>
+        <article class="lane">
+          <h3>Who gets scarce supplies</h3>
+          <p>Wards are served in priority order until a regional pool or the crew pool runs out. Shortfalls are named exactly.</p>
+          <ul id="allocList" class="alloc"></ul>
+          <p class="cap" id="allocCap"></p>
+        </article>
+        <article class="lane">
+          <h3>What each ward is told</h3>
+          <p>A fixed template writes the alert. No AI service is called, so the same inputs always give the same message.</p>
+          <div class="phone"><pre id="smsText"></pre></div>
+          <p class="cap" id="smsCap"></p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap split" id="accuracy" aria-labelledby="hAcc">
+    <div>
+      <h2 id="hAcc">Tested on a year the models never saw</h2>
+      <p class="intro">The last 52 weeks were held out from training. Each bar is the average miss, in cases per ward per week.</p>
+      <div id="acc" class="acc"></div>
+      <ul class="plain">
+        <li id="covLine"></li>
+        <li>Counts are mostly zero, so the 10th to 90th percentile range is wider than a normal 80% band.</li>
+        <li>Prevention effects are modeled, not measured in the field.</li>
+      </ul>
+    </div>
+    <div class="how">
+      <h2>How a forecast becomes a dispatch</h2>
+      <ol class="steps">
+        <li><b>Learn.</b> Gradient-boosted models read rainfall, temperature and humidity going back 8 weeks, plus each ward's density, water-logging and sanitation.</li>
+        <li><b>Forecast.</b> A mean and a 10th and 90th percentile for weeks 2, 3 and 4.</li>
+        <li><b>Rank.</b> Priority grows with predicted cases, density, water-logging and poor sanitation.</li>
+        <li><b>Allocate.</b> Saline, test kits and crews go to the highest-ranked wards first.</li>
+        <li><b>Route beds.</b> Overflow patients move to the ward with the most spare beds, inside the same city only.</li>
+        <li><b>Dispatch.</b> SMS, WhatsApp and a printable commissioner brief for every ward.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band dark" id="offline" aria-labelledby="hOff">
+    <div class="wrap split">
+      <div>
+        <h2 id="hOff">Unplug the network. It still works.</h2>
+        <p class="intro">The engine blocks every outbound connection, runs the whole pipeline twice, and checks that nothing leaked and the results are identical.</p>
+        <button id="runStress" class="btn btn-primary" type="button">Run the offline stress test</button>
+        <p class="sub" id="stressSum" role="status"></p>
+      </div>
+      <ul id="stressList" class="checks" aria-live="polite">
+        <li class="idle">Nine checks run in about a second: no outside URLs in the page, a blocked-network run, a blocked probe to 8.8.8.8, a repeat-run match, no cross-city transfers, bed conservation, stock limits, SMS length and a full 60-ward ranking.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="wrap closing" aria-labelledby="hGo">
+    <h2 id="hGo">Try a shortage</h2>
+    <p class="intro">Drag stock down to 30%, crews to 10 and the surge to 1.5x. Watch which wards keep their supplies and where patients are sent.</p>
+    <a class="btn btn-primary dark-on-light" href="/app">Open command center</a>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-grid">
+    <p><b>Kinrei EWS</b>. FastAPI, scikit-learn and plain HTML, CSS and JavaScript. No CDNs, no cloud APIs, no language-model calls at runtime.</p>
+    <p>Outputs support decisions and are not medical or operational orders. Qualified public-health staff must review them before anyone acts. Parts of the code and documents were drafted with Claude (Anthropic) and checked by the authors, who remain responsible for the data, code and results.</p>
+  </div>
+</footer>
+<script src="/static/landing.js"></script>
+</body>
+</html>
