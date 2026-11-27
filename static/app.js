@@ -1,291 +1,392 @@
 "use strict";
-const TIERS = ["Low", "Medium", "High", "Critical"];
-const COLORS = { Low: "#8fbaa9", Medium: "#ecc94b", High: "#e07a3c", Critical: "#a1233a" };
-const $ = (s) => document.querySelector(s);
-const state = { boot: null, idx: 0, h: 3, city: "All cities", ward: null, view: "forecast", val: null };
-const cache = new Map();
+const $ = (s, r = document) => r.querySelector(s);
+const h = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of kids.flat()) e.append(c instanceof Node ? c : String(c));
+  return e;
+};
+const DEFAULTS = { scenario: "peak", city: "All", basis: "expected", stock: 60, crews: 40, surge: 1, colorBy: "rank" };
+const S = { ...DEFAULTS, ward: null, plan: null, sim: null, fc: {}, asg: {}, tab: "sms", texts: {}, ovfTab: "sms", ovfTexts: {}, status: null };
+const q = () => `scenario=${S.scenario}&basis=${S.basis}&stock=${S.stock}&crews=${S.crews}&surge=${S.surge}`;
+const f1 = (x) => Number(x).toFixed(1), f2 = (x) => Number(x).toFixed(2);
+const pct = (a, r) => (r ? Math.round((100 * a) / r) : 100);
 
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const fmt = (n, d = 1) => Number(n).toFixed(d);
-const day = (iso) => new Date(iso + "T00:00:00Z");
-const longDate = (iso) => day(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-const addDays = (iso, n) => new Date(day(iso).getTime() + n * 864e5);
-const iso = (d) => d.toISOString().slice(0, 10);
-const shortWard = (id) => id.replace(/_?Ward_?/i, " ").replace("_", " ").trim();
-const tileLabel = (id) => id.split("_").pop();
+/* ---- saved settings: a convenience only, the page works without storage */
+const KEY = "dengue-ews:controls";
+const saveControls = () => { try { localStorage.setItem(KEY, JSON.stringify(Object.fromEntries(Object.keys(DEFAULTS).map((k) => [k, S[k]])))); } catch (e) { /* storage unavailable */ } };
+const loadControls = () => { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { return {}; } };
 
-async function api(path) {
-  if (cache.has(path)) return cache.get(path);
-  const p = fetch(path).then((r) => { if (!r.ok) throw new Error(path + " " + r.status); return r.json(); });
-  cache.set(path, p);
-  p.catch(() => cache.delete(path));
-  return p;
+/* ---- network, errors, stale-response protection */
+async function api(path, opt) {
+  const r = await fetch(path, opt);
+  if (!r.ok) throw new Error((await r.text()).slice(0, 200) || `HTTP ${r.status}`);
+  return r.json();
 }
-const origin = () => state.boot.origins[state.idx];
+let toastTimer;
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 7000);
+}
+const safe = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(`Could not update: ${e.message}`); } };
+let busy = 0, seq = 0;
+const track = async (fn) => {
+  busy++; $("#progress").classList.add("on");
+  try { return await fn(); } finally { if (--busy === 0) $("#progress").classList.remove("on"); }
+};
+let timer;
+const later = (fn) => { clearTimeout(timer); timer = setTimeout(safe(fn), 150); };
 
-/* ---------- controls ---------- */
-function setupControls() {
-  const b = state.boot, sl = $("#origin-slider");
-  sl.max = b.origins.length - 1;
-  const startDate = b.default_origin || b.latest_origin;
-  const startIdx = b.origins.indexOf(startDate);
-  state.idx = startIdx >= 0 ? startIdx : b.origins.length - 1;
-  sl.value = state.idx;
+const rows = () => S.plan.wards.filter((r) => S.city === "All" || r.city === S.city);
+const rankBin = (r) => (r.priority <= 0 ? 0 : r.rank <= 6 ? 5 : r.rank <= 15 ? 4 : r.rank <= 27 ? 3 : r.rank <= 40 ? 2 : r.rank <= 52 ? 1 : 0);
+const casesBin = (r) => (r.pred < 0.2 ? 0 : r.pred < 1 ? 1 : r.pred < 4 ? 2 : r.pred < 8 ? 3 : r.pred < 12 ? 4 : 5);
+const bin = (r) => (S.colorBy === "cases" ? casesBin(r) : rankBin(r));
 
-  let timer;
-  sl.addEventListener("input", () => {
-    state.idx = +sl.value;
-    $("#origin-label").textContent = longDate(origin());
-    clearTimeout(timer);
-    timer = setTimeout(refresh, 120);
-  });
-  $("#prev").onclick = () => move(-1);
-  $("#next").onclick = () => move(1);
-
-  const presets = [
-    ["Peak 2025", "2025-08-04"],
-    ["Monsoon onset 2025", "2025-06-02"],
-    ["Peak 2024", "2024-08-05"],
-    ["Dry season 2025", "2025-02-03"],
-    ["Latest week", b.latest_origin],
-  ];
-  $("#presets").innerHTML = presets.map(([l, d]) => `<button data-d="${d}">${l}</button>`).join("");
-  $("#presets").onclick = (e) => { const d = e.target.dataset.d; if (d) goTo(d); };
-
-  $("#horizon").onclick = (e) => {
-    const h = e.target.dataset.h; if (!h) return;
-    state.h = +h;
-    document.querySelectorAll("#horizon button").forEach((x) => x.classList.toggle("on", x.dataset.h === h));
-    refresh();
-  };
-  $("#city").innerHTML = b.cities.map((c) => `<option>${esc(c)}</option>`).join("");
-  $("#city").onchange = (e) => { state.city = e.target.value; renderBoard(state.fc); };
-  $("#legend").innerHTML = TIERS.map((t, i) => {
-    const th = b.tiers.thresholds, lo = i === 0 ? 0 : th[i - 1], range = i === 3 ? `${lo}+` : `${lo} to <${th[i]}`;
-    return `<li><span class="sw" style="background:${COLORS[t]}"></span>${t}<small>${range} cases</small></li>`;
-  }).join("");
-  document.querySelectorAll(".tabs button").forEach((t) => (t.onclick = () => switchView(t.dataset.view)));
-  $("#trained").textContent = "Model trained " + b.trained_at.slice(0, 10) + ".";
+function table(el, heads, body, onRow) {
+  el.replaceChildren(h("thead", {}, h("tr", {}, heads.map(([t, n]) => h("th", { class: n ? "n" : "", scope: "col" }, t)))));
+  const tb = h("tbody");
+  for (const { cells, cls, id } of body) {
+    const tr = h("tr", { class: cls || "", tabindex: onRow ? "0" : null });
+    cells.forEach((c, i) => tr.append(h("td", { class: heads[i][1] ? "n" : "" }, c)));
+    if (onRow) { tr.addEventListener("click", () => onRow(id)); tr.addEventListener("keydown", (e) => { if (e.key === "Enter") onRow(id); }); }
+    tb.append(tr);
+  }
+  el.append(tb);
 }
 
-function move(d) { state.idx = Math.min(Math.max(state.idx + d, 0), state.boot.origins.length - 1); $("#origin-slider").value = state.idx; refresh(); }
-function goTo(d) {
-  const o = state.boot.origins; let i = o.length - 1;
-  while (i > 0 && o[i] > d) i--;
-  state.idx = i; $("#origin-slider").value = i; refresh();
-}
-function switchView(v) {
-  state.view = v;
-  $("#view-forecast").hidden = v !== "forecast";
-  $("#view-validation").hidden = v !== "validation";
-  document.querySelectorAll(".tabs button").forEach((t) => t.setAttribute("aria-selected", t.dataset.view === v));
-  if (v === "validation") renderValidation();
+/* ---------------------------------------------------------------- heatmap */
+function renderHeat() {
+  const box = $("#heat");
+  box.replaceChildren();
+  for (const c of S.plan.cities.filter((c) => S.city === "All" || c.city === S.city)) {
+    const ws = S.plan.wards.filter((r) => r.city === c.city).sort((a, b) => a.ward_id.localeCompare(b.ward_id));
+    const tiles = h("div", { class: "tiles" }, ws.map((r) => h("button", {
+      class: `tile t${bin(r)}${r.deficit ? " def" : ""}${r.ward_id === S.ward ? " sel" : ""}`,
+      title: `${r.ward_id}: ${f1(r.pred)} cases/wk, priority rank ${r.rank}${r.deficit ? ", CRITICAL DEFICIT" : ""}`,
+      "aria-label": `${r.ward_id}, priority rank ${r.rank}, ${f1(r.pred)} cases per week${r.deficit ? ", critical deficit" : ""}`,
+      "aria-pressed": String(r.ward_id === S.ward),
+      onclick: () => pick(r.ward_id) }, r.ward_id.slice(-2))));
+    box.append(h("div", { class: "hrow" }, h("span", {}, c.city, h("small", {}, `${c.wards} wards`)), tiles));
+  }
+  const byCases = S.colorBy === "cases";
+  $("#legLo").textContent = byCases ? "0 cases" : "Lower priority";
+  $("#legHi").textContent = byCases ? "12 or more" : "Higher";
+  renderKpis();
 }
 
-/* ---------- forecast view ---------- */
+function kpi(label, value, note, cls = "") {
+  return h("div", { class: `kpi ${cls}` }, h("span", { class: "kl" }, label), h("b", {}, value), note ? h("small", {}, note) : "");
+}
+
+function renderKpis() {
+  const t = S.plan.totals, vis = rows();
+  const cases = vis.reduce((a, r) => a + r.pred, 0);
+  const demand = (k) => `${t[k].allocated} of ${t[k].required}`;
+  $("#kpis").replaceChildren(
+    kpi("Expected cases per week", f1(cases), S.city === "All" ? "all 60 wards" : S.city),
+    kpi("Saline bags filled", `${pct(t.saline.allocated, t.saline.required)}%`, demand("saline")),
+    kpi("Test kits filled", `${pct(t.kits.allocated, t.kits.required)}%`, demand("kits")),
+    kpi("Spraying crews filled", `${pct(t.crews.allocated, t.crews.required)}%`, demand("crews")),
+    kpi("Wards in critical deficit", S.plan.deficit_wards, S.plan.deficit_wards ? "supply short" : "none", S.plan.deficit_wards ? "bad" : "ok"),
+    kpi("Unmet bed demand", S.plan.unmet_beds, S.plan.unmet_beds ? "patients with no bed" : "none", S.plan.unmet_beds ? "bad" : "ok"));
+}
+
+/* ------------------------------------------------------- ward detail panel */
+function chartSvg(f, surge) {
+  const hs = ["h2", "h3", "h4"], W = 300, H = 170, L = 30, R = 26, T = 14, B = 30;
+  const g = (k) => hs.map((x) => f[`${x}_${k}`] * surge);
+  const hi = g("hi"), lo = g("lo"), mean = g("mean");
+  const ymax = Math.max(2, Math.ceil(Math.max(...hi) / 2) * 2);
+  const x = (i) => L + (i * (W - L - R)) / 2, y = (v) => T + (1 - v / ymax) * (H - T - B);
+  const band = [...hi.map((v, i) => `${x(i)},${y(v)}`), ...[2, 1, 0].map((i) => `${x(i)},${y(lo[i])}`)].join(" ");
+  const ticks = [0, ymax / 2, ymax].map((v) => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 5}" y="${y(v) + 4}" text-anchor="end">${v}</text>`).join("");
+  const dates = Object.values(S.status.scenarios[S.scenario].targets);
+  const xs = hs.map((_, i) => `<text x="${x(i)}" y="${H - 10}" text-anchor="middle">${(dates[i] || "").slice(5)}</text>`).join("");
+  const dots = mean.map((v, i) => `<circle class="dot" cx="${x(i)}" cy="${y(v)}" r="3.5"/><text class="val" x="${x(i)}" y="${y(v) - 8}" text-anchor="middle">${f1(v)}</text>`).join("");
+  const path = mean.map((v, i) => `${i ? "L" : "M"}${x(i)},${y(v)}`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Expected cases ${mean.map(f1).join(", ")} for weeks 2, 3 and 4">${ticks}<polygon class="band-area" points="${band}"/><path class="line" d="${path}"/>${dots}${xs}</svg>`;
+}
+
+async function forecasts() {
+  if (!S.fc[S.scenario]) {
+    const d = await api(`/api/forecast?scenario=${S.scenario}`);
+    S.fc[S.scenario] = Object.fromEntries(d.wards.map((w) => [w.ward_id, w]));
+  }
+  return S.fc[S.scenario];
+}
+
+async function renderDetail() {
+  const r = S.plan && S.plan.wards.find((x) => x.ward_id === S.ward), body = $("#detailBody");
+  if (!r) { body.replaceChildren(h("p", { class: "sub" }, "Choose a ward on the heatmap.")); return; }
+  const fc = (await forecasts())[r.ward_id];
+  if (r.ward_id !== S.ward) return;
+  const fulfil = h("span", { class: r.deficit ? "bad" : "ok" }, r.deficit ? `${r.fulfillment_pct}% of need met` : "Fully supplied");
+  const route = [...r.send_to.map(([w, n]) => `Send ${n} to ${w}`), ...r.receive_from.map(([w, n]) => `Receive ${n} from ${w}`)];
+  body.replaceChildren(
+    h("p", { class: "dn" }, h("b", {}, r.ward_id), " ", r.city),
+    h("div", { class: "chart" }),
+    h("p", { class: "cap" }, "Weekly cases for weeks 2 to 4. Line is expected; shaded area is the 10th to 90th percentile."),
+    h("dl", { class: "facts" },
+      h("div", {}, h("dt", {}, "Priority rank"), h("dd", {}, `${r.rank} of ${S.plan.wards.length}`)),
+      h("div", {}, h("dt", {}, "Supply"), h("dd", {}, fulfil)),
+      h("div", {}, h("dt", {}, "Beds"), h("dd", {}, `${r.beds_req} needed, ${r.capacity} available`)),
+      h("div", {}, h("dt", {}, "Density"), h("dd", {}, `${Math.round(r.density).toLocaleString("en-US")} per sq km`)),
+      h("div", {}, h("dt", {}, "Water-logging / sanitation"), h("dd", {}, `${f2(r.wl)} / ${f2(r.san)}`)),
+      h("div", {}, h("dt", {}, "Bed routing"), h("dd", {}, route.length ? route.join("; ") : r.unmet_beds ? `${r.unmet_beds} unplaced` : "No transfers"))));
+  $(".chart", body).innerHTML = chartSvg(fc, S.surge);
+}
+
+/* -------------------------------------------------------------- tables */
+const shortText = (r) => [["saline", r.saline_short], ["kits", r.kits_short], ["crews", r.crews_short]].filter((x) => x[1] > 0).map((x) => `${x[0]} ${x[1]}`).join(", ");
+
+function renderAlloc() {
+  const ratio = (a, r) => `${a} / ${r}`;
+  table($("#alloc"), [["Rank", 1], ["Ward"], ["Cases/wk", 1], ["Priority", 1], ["Saline", 1], ["Kits", 1], ["Crews", 1], ["Status"]],
+    rows().map((r) => ({ id: r.ward_id, cls: r.ward_id === S.ward ? "sel" : "",
+      cells: [r.rank, r.ward_id, r.cases, f2(r.priority), ratio(r.saline_alloc, r.saline_req), ratio(r.kits_alloc, r.kits_req), ratio(r.crews_alloc, r.crews_req),
+        r.deficit ? h("span", { class: "badge" }, `CRITICAL DEFICIT: short ${shortText(r)}`) : h("span", { class: "ok" }, "Fully supplied")] })), pick);
+}
+
+function downloadCsv() {
+  const cols = ["rank", "ward_id", "city", "cases", "priority", "saline_alloc", "saline_req", "kits_alloc", "kits_req", "crews_alloc", "crews_req", "fulfillment_pct", "deficit", "beds_req", "capacity", "overflow", "unmet_beds"];
+  const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.split('"').join('""')}"` : s; };
+  const lines = [cols.join(","), ...rows().map((r) => cols.map((c) => esc(c === "priority" ? f2(r[c]) : r[c])).join(","))];
+  const url = URL.createObjectURL(new Blob([lines.join("\n") + "\n"], { type: "text/csv" }));
+  const a = h("a", { href: url, download: `allocation_${S.scenario}_stock${S.stock}_crews${S.crews}_surge${S.surge}.csv` });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function buildOverflowMessages(m) {
+  const fromW = S.plan.wards.find((w) => w.ward_id === m.from) || {};
+  const toW = S.plan.wards.find((w) => w.ward_id === m.to) || {};
+  const d = S.plan.dates || {};
+  const win = d["2"] && d["4"] ? `${d["2"]} to ${d["4"]}` : "Active Forecast Window";
+
+  let sms = `DENGUE OVERFLOW [${m.city}]: ${m.from} beds full. Route ${m.patients} pts to ${m.to} hospital (nearest spare beds). Confirm intake.`;
+  if (sms.length > 160) sms = sms.slice(0, 157) + "...";
+
+  const wa = [
+    `*HOSPITAL OVERFLOW TRANSFER ORDER — ${m.city.toUpperCase()}*`,
+    `Forecast window: ${win} | Surge: ${Number(S.surge).toFixed(1)}x`,
+    ``,
+    `*Overflowing Facility:* ${m.from} (${fromW.cases ?? "-"} cases/wk, demand ${fromW.beds_req ?? "-"} / cap ${fromW.capacity ?? "-"} beds)`,
+    `*Nearest Receiving Hospital:* ${m.to} (demand ${toW.beds_req ?? "-"} / cap ${toW.capacity ?? "-"} beds)`,
+    `*Patients Authorized for Transfer:* ${m.patients}`,
+    ``,
+    `*Action Checklist:*`,
+    `- [ ] ${m.from}: Stabilize & dispatch ${m.patients} dengue patients`,
+    `- [ ] ${m.to}: Reserve ${m.patients} IV/isolation beds & confirm receipt`,
+    `- [ ] Control Room: Update intra-city bed ledger`
+  ].join("\n");
+
+  const doc = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Hospital transfer brief ${m.from} to ${m.to}</title><style>
+body{font:14px/1.5 Georgia,serif;color:#17231f;max-width:760px;margin:24px auto;padding:0 16px}
+h1{font-size:22px;margin:0} h2{font-size:15px;border-bottom:1px solid #17231f;margin-top:22px}
+.sub{color:#4f6168;font-size:13px;margin-top:2px}
+table{border-collapse:collapse;width:100%;margin-top:10px} td,th{border:1px solid #9aa8a0;padding:6px 8px;text-align:left}
+.alert{background:#b42318;color:#fff;padding:8px 12px;font-weight:bold;margin:12px 0}
+.sig{margin-top:36px;display:flex;gap:40px} .sig div{flex:1;border-top:1px solid #17231f;padding-top:4px}
+@media print{body{margin:0;max-width:none} .alert{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style></head><body>
+<h1>Intra-City Hospital Overflow Transfer Brief</h1>
+<div class="sub">${m.city} City Corporation &bull; Forecast window ${win} &bull; Surge ${Number(S.surge).toFixed(1)}x</div>
+<div class="alert">OVERFLOW ROUTING DIRECTIVE: TRANSFER ${m.patients} PATIENTS</div>
+<h2>Facility routing details</h2><table>
+<tr><th>Source Hospital (Saturated)</th><td><b>${m.from}</b> (Demand: ${fromW.beds_req ?? "-"} / Capacity: ${fromW.capacity ?? "-"} beds)</td></tr>
+<tr><th>Nearest Receiving Hospital (Spare Capacity)</th><td><b>${m.to}</b> (Demand: ${toW.beds_req ?? "-"} / Capacity: ${toW.capacity ?? "-"} beds)</td></tr>
+<tr><th>Authorized Transfer Volume</th><td><b>${m.patients} patients</b></td></tr>
+<tr><th>Jurisdiction Policy</th><td>Strict Intra-City Routing (${m.city} only)</td></tr>
+</table>
+<h2>Operational directive</h2>
+<p><b>${m.from}</b> has exceeded its inpatient dengue bed capacity. Duty officers must stabilize and transfer <b>${m.patients} patients</b> immediately to <b>${m.to}</b>, the nearest facility within ${m.city} with verified spare inpatient beds.</p>
+<div class="sig"><div>Sending Medical Officer (${m.from})</div><div>Receiving Registrar (${m.to})</div><div>City Health Commissioner</div></div>
+</body></html>`;
+
+  return { sms, wa, doc };
+}
+
+function renderOverflowDispatch(selectedIdx = 0) {
+  const mList = S.plan.manifest.filter((x) => S.city === "All" || x.city === S.city);
+  const statusEl = $("#ovfStatus");
+  const bodyEl = $("#ovfBody");
+  if (!mList.length) {
+    bodyEl.hidden = true;
+    statusEl.textContent = S.plan.unmet_beds
+      ? "All hospitals in this city are at 100% capacity — no spare receiving hospital available."
+      : "No hospital overflow at this surge level. Slide Outbreak surge to 1.5x or higher to trigger nearest-hospital transfer suggestions.";
+    return;
+  }
+  bodyEl.hidden = false;
+  statusEl.textContent = `${mList.length} overflow transfer route(s) active. Nearest intra-city receiving hospital selected automatically (click any manifest row to inspect).`;
+  const sel = $("#ovfSel");
+  sel.replaceChildren(...mList.map((m, idx) => h("option", { value: idx }, `${m.from} → ${m.to} (${m.patients} pts, ${m.city})`)));
+  const idx = Math.min(selectedIdx, mList.length - 1);
+  sel.value = String(idx);
+  S.ovfTexts = buildOverflowMessages(mList[idx]);
+  $("#ovfSmsTxt").textContent = S.ovfTexts.sms;
+  $("#ovfSmsLen").textContent = `${S.ovfTexts.sms.length} of 160 characters`;
+  $("#ovfWaTxt").textContent = S.ovfTexts.wa;
+  $("#ovfDocFrame").srcdoc = S.ovfTexts.doc;
+}
+
+function renderBeds() {
+  const m = S.plan.manifest.filter((x) => S.city === "All" || x.city === S.city);
+  if (!m.length) $("#xfer").replaceChildren(h("caption", { class: "sub", style: "padding:10px;text-align:left" }, S.plan.unmet_beds ? "No ward has spare beds to receive transfers." : "No transfers needed at this load. Raise the surge to test overflow."));
+  else table($("#xfer"), [["From ward"], ["To ward"], ["City"], ["Patients", 1]], m.map((x, idx) => ({ id: idx, cells: [x.from, x.to, x.city, x.patients] })), (idx) => renderOverflowDispatch(idx));
+  table($("#cityTbl"), [["City"], ["Demand", 1], ["Capacity", 1], ["Utilization", 1], ["Routed", 1], ["Unmet", 1]],
+    S.plan.cities.filter((c) => S.city === "All" || c.city === S.city).map((c) => ({ cells: [c.city, c.demand, c.capacity, `${f1(c.utilization_pct)}%`, c.routed, c.unmet] })));
+  renderOverflowDispatch(0);
+}
+
+function renderBoard() {
+  const dep = Object.fromEntries((S.sim.deployment || []).map((d) => [d.ward_id, d]));
+  const t = S.sim.totals;
+  $("#simTotals").replaceChildren(...(t.crews ? [
+    h("span", {}, "Crews deployed ", h("b", {}, t.crews)), h("span", {}, "Cases prevented, weeks 2 to 4 ", h("b", {}, f1(t.cases_prevented))),
+    h("span", {}, "Beds freed ", h("b", {}, f1(t.beds_freed))), h("span", {}, "Saline saved ", h("b", {}, f1(t.saline_saved))),
+    h("span", {}, "ROI ", h("b", {}, `${f2(t.roi)} cases per crew`))] : [h("span", { class: "sub" }, "No crews deployed. Choose crews per ward below, or auto-assign.")]));
+  table($("#board"), [["ROI rank", 1], ["Ward"], ["City"], ["Best crews", 1], ["Cases prevented", 1], ["Beds freed", 1], ["Saline saved", 1], ["ROI", 1], ["Engine"], ["Deploy"]],
+    S.sim.leaderboard.filter((x) => S.city === "All" || x.city === S.city).map((x) => ({ cls: dep[x.ward_id] ? "dep" : "",
+      cells: [x.rank, x.ward_id, x.city, x.best_crews, f2(x.cases_prevented), f2(x.beds_freed), f2(x.saline_saved), f2(x.roi), x.engine,
+        h("select", { "aria-label": `Crews for ${x.ward_id}`, onchange: (e) => { S.asg[x.ward_id] = +e.target.value; } },
+          [0, 1, 2, 3].map((k) => h("option", { value: k, selected: (S.asg[x.ward_id] || 0) === k }, k)))] })));
+}
+
+/* ------------------------------------------------------------- data flow */
+async function loadBoard(body) {
+  const mine = ++loadBoard.n;
+  const sim = await track(() => api("/api/vector-simulate", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scenario: S.scenario, basis: S.basis, surge: S.surge, assignments: {}, auto_crews: null, ...body }) }));
+  if (mine !== loadBoard.n) return;
+  S.sim = sim; renderBoard();
+}
+loadBoard.n = 0;
+
+async function loadDispatch() {
+  if (!S.ward) return;
+  const mine = ++loadDispatch.n;
+  const d = await api(`/api/dispatch/${S.ward}?${q()}`);
+  if (mine !== loadDispatch.n) return;
+  S.texts = { sms: d.sms, wa: d.whatsapp, doc: d.commissioner_html };
+  $("#smsTxt").textContent = d.sms;
+  $("#smsLen").textContent = `${d.sms_length} of 160 characters`;
+  $("#waTxt").textContent = d.whatsapp;
+  $("#docFrame").srcdoc = d.commissioner_html;
+}
+
+loadDispatch.n = 0;
+
+const pick = safe(async (id) => { S.ward = id; $("#wardSel").value = id; renderHeat(); renderAlloc(); await Promise.all([renderDetail(), loadDispatch()]); });
+
 async function refresh() {
-  $("#origin-label").textContent = longDate(origin());
-  try {
-    state.fc = await api(`/api/forecast?origin=${origin()}&horizon=${state.h}`);
-  } catch (e) { $("#summary").innerHTML = `<p>Could not load the forecast. Check that the server is running and reload.</p>`; return; }
-  $("#target-note").textContent = `Risk for the week of ${longDate(state.fc.target_date)}` + (state.fc.is_latest ? " (future, no outcome yet)." : ".");
-  renderBoard(state.fc);
-  if (state.ward) loadWard(state.ward);
+  const mine = ++seq;
+  const plan = await track(() => api(`/api/operations?${q()}`));
+  if (mine !== seq) return;
+  S.plan = plan;
+  const vis = rows();
+  if (!vis.find((r) => r.ward_id === S.ward)) S.ward = vis[0].ward_id;
+  $("#wardSel").replaceChildren(...vis.slice().sort((a, b) => a.ward_id.localeCompare(b.ward_id)).map((r) => h("option", { value: r.ward_id }, r.ward_id)));
+  $("#wardSel").value = S.ward;
+  renderHeat(); renderAlloc(); renderBeds();
+  await Promise.all([renderDetail(), loadDispatch()]);
+}
+const reloadAll = async () => { S.asg = {}; await Promise.all([refresh(), loadBoard({})]); };
+
+function syncControls() {
+  $("#stock").value = S.stock; $("#stockO").textContent = `${S.stock}%`;
+  $("#crews").value = S.crews; $("#crewsO").textContent = S.crews;
+  $("#surge").value = S.surge; $("#surgeO").textContent = `${Number(S.surge).toFixed(1)}x`;
+  $("#basis").value = S.basis; $("#colorBy").value = S.colorBy;
+  document.querySelectorAll("input[name=scenario]").forEach((r) => { r.checked = r.value === S.scenario; });
+  const s = S.status.scenarios[S.scenario];
+  $("#asof").textContent = `Forecast origin ${s.as_of}. Targets: ${Object.values(s.targets).join(", ")}`;
 }
 
-function renderBoard(fc) {
-  if (!fc) return;
-  const wards = fc.wards.filter((w) => state.city === "All cities" || w.city === state.city);
-  const counts = Object.fromEntries(TIERS.map((t) => [t, 0]));
-  wards.forEach((w) => counts[w.tier]++);
-  const n = wards.length, hot = counts.High + counts.Critical;
-  $("#summary").innerHTML =
-    `<p>${hot === 0 ? "No wards" : hot + " of " + n + " wards"} expected at High or Critical risk in the week of ${longDate(fc.target_date)}.</p>` +
-    `<div class="bar" role="img" aria-label="${TIERS.map((t) => counts[t] + " " + t).join(", ")}">` +
-    TIERS.filter((t) => counts[t]).map((t) => `<div style="flex:${counts[t]};background:${COLORS[t]};color:${t === "High" || t === "Critical" ? "#fff" : "#17262b"}">${counts[t]} ${t}</div>`).join("") + `</div>`;
-
-  const byCity = {};
-  wards.slice().sort((a, b) => a.ward_id.localeCompare(b.ward_id)).forEach((w) => (byCity[w.city] = byCity[w.city] || []).push(w));
-  $("#board").innerHTML = Object.keys(byCity).sort().map((c) =>
-    `<div class="city"><h3>${esc(c)}</h3><div class="tiles">` +
-    byCity[c].map((w) => `<button class="tile t-${w.tier}" data-w="${w.ward_id}" aria-pressed="${w.ward_id === state.ward}" aria-label="${esc(shortWard(w.ward_id))}: ${w.tier} risk, about ${fmt(w.predicted_cases)} cases expected">` +
-      `<small>${esc(tileLabel(w.ward_id))}</small><b>${fmt(w.predicted_cases, w.predicted_cases >= 10 ? 0 : 1)}</b></button>`).join("") + `</div></div>`).join("");
-  $("#board").onclick = (e) => { const t = e.target.closest("[data-w]"); if (t) selectWard(t.dataset.w); };
-
-  const hasActual = wards.some((w) => w.actual_cases !== null);
-  $("#rank").innerHTML = `<tr><th>Ward</th><th>City</th><th>Tier</th><th class="num">Expected cases</th><th class="num">80% range</th><th>Could reach</th>${hasActual ? '<th class="num">Actual</th>' : ""}</tr>` +
-    wards.slice(0, 8).map((w) => `<tr data-w="${w.ward_id}" tabindex="0"><td>${esc(shortWard(w.ward_id))}</td><td>${esc(w.city)}</td><td><span class="chip t-${w.tier}">${w.tier}</span></td>` +
-      `<td class="num">${fmt(w.predicted_cases)}</td><td class="num">${fmt(w.low, 0)} to ${fmt(w.high, 0)}</td><td>${w.worst_case_tier}</td>${hasActual ? `<td class="num">${w.actual_cases} <span class="chip t-${w.actual_tier}">${w.actual_tier}</span></td>` : ""}</tr>`).join("");
-  $("#rank").onclick = (e) => { const t = e.target.closest("[data-w]"); if (t) selectWard(t.dataset.w); };
-  $("#rank").onkeydown = (e) => { if (e.key === "Enter") { const t = e.target.closest("[data-w]"); if (t) selectWard(t.dataset.w); } };
-}
-
-function selectWard(id) { state.ward = id; document.querySelectorAll(".tile").forEach((t) => t.setAttribute("aria-pressed", t.dataset.w === id)); loadWard(id); }
-
-function renderDriversAndFacts(drivers, facts) {
-  const maxAbs = Math.max(...drivers.map((x) => Math.abs(x.contribution)), 0.01);
-  return (
-    `<h4>What is driving this score (cases per week vs. an average ward-week)</h4>` +
-    drivers.map((x) => {
-      const w = Math.abs(x.contribution) / maxAbs * 50, pos = x.contribution >= 0;
-      return `<div class="drv"><span>${esc(x.driver)}</span><div class="track"><div class="fill" style="left:${pos ? 50 : 50 - w}%;width:${w}%;background:${pos ? "var(--pos)" : "var(--neg)"}"></div></div><span class="v">${pos ? "+" : ""}${fmt(x.contribution, 1)}</span></div>`;
-    }).join("") +
-    `<p class="hint">Orange raises expected cases, blue lowers them. Values are exact Shapley contributions of each factor group.</p>` +
-    `<h4>Key readings</h4><table class="facts">${facts.map((x) => `<tr><td>${esc(x.label)}</td><td class="num">${x.value} ${x.unit}</td><td class="num">typical ${x.typical}</td></tr>`).join("")}</table>`
-  );
-}
-
-async function loadWard(id) {
-  let d;
-  try { d = await api(`/api/ward/${id}?origin=${origin()}&horizon=${state.h}`); }
-  catch (e) { $("#detail").innerHTML = `<p class="empty">Could not load ${esc(id)}.</p>`; return; }
-  if (state.ward !== id) return;
-  const f = d.horizons[state.h];
-  const dw = d.default_weather || { rainfall_mm: 40, avg_temp_c: 28, humidity_pct: 75 };
-  const sentence = `About ${fmt(f.predicted_cases, 0)} cases expected in the week of ${longDate(f.target_date)} (80% range ${fmt(f.low, 0)} to ${fmt(f.high, 0)}).` +
-    (f.worst_case_tier !== f.tier ? ` The upper end would be ${f.worst_case_tier}.` : "");
-
-  $("#detail").innerHTML =
-    `<h3>${esc(shortWard(d.ward_id))}, ${esc(d.city)}</h3>` +
-    `<p class="headline" id="ward-headline"><span class="chip t-${f.tier}">${f.tier}</span> ${sentence}</p>` +
-    `<div class="fan">${[2, 3, 4].map((h) => { const x = d.horizons[h]; return `<button data-h="${h}" aria-pressed="${h === state.h}"><small>${h} weeks ahead</small><b>${fmt(x.predicted_cases, 0)}</b> <span class="chip t-${x.tier}">${x.tier}</span></button>`; }).join("")}</div>` +
-    `<div style="margin:12px 0;padding:12px;border:1px solid #d5e0e3;border-radius:10px;background:#f8fbfc">` +
-      `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">` +
-        `<strong style="font-size:13px">What-If Weather Simulator (Breeding Lag Input)</strong>` +
-        `<button type="button" id="sim-reset" style="font-size:11px;padding:3px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer">Reset</button>` +
-      `</div>` +
-      `<label style="display:block;font-size:12px;margin-bottom:6px">Weekly Rainfall (0&ndash;4w window): <b id="sim-r-val">${dw.rainfall_mm}</b> mm` +
-        `<input type="range" id="sim-r" min="0" max="260" step="5" value="${dw.rainfall_mm}" style="width:100%"></label>` +
-      `<label style="display:block;font-size:12px;margin-bottom:6px">Avg Temperature: <b id="sim-t-val">${dw.avg_temp_c}</b> &deg;C` +
-        `<input type="range" id="sim-t" min="16" max="38" step="0.5" value="${dw.avg_temp_c}" style="width:100%"></label>` +
-      `<label style="display:block;font-size:12px">Relative Humidity: <b id="sim-h-val">${dw.humidity_pct}</b> %` +
-        `<input type="range" id="sim-h" min="40" max="99" step="1" value="${dw.humidity_pct}" style="width:100%"></label>` +
-    `</div>` +
-    `<h4>Cases and the rainfall behind them</h4>${timeline(d)}` +
-    `<div class="key"><span>&#9644; reported cases</span><span>&#9679; forecast with 80% range</span><span>&#9670; what happened next</span><span>shaded: last 5 weeks of rain, the model's closest lags</span></div>` +
-    `<div id="ward-dynamic">${renderDriversAndFacts(d.drivers, d.facts)}</div>`;
-
-  $("#detail").querySelector(".fan").onclick = (e) => {
-    const b = e.target.closest("[data-h]"); if (!b) return;
-    state.h = +b.dataset.h;
-    document.querySelectorAll("#horizon button").forEach((x) => x.classList.toggle("on", x.dataset.h === String(state.h)));
-    refresh();
-  };
-
-  let simTimer;
-  const runSim = () => {
-    const rVal = +$("#sim-r").value, tVal = +$("#sim-t").value, hVal = +$("#sim-h").value;
-    $("#sim-r-val").textContent = rVal;
-    $("#sim-t-val").textContent = tVal;
-    $("#sim-h-val").textContent = hVal;
-    clearTimeout(simTimer);
-    simTimer = setTimeout(async () => {
-      try {
-        const res = await fetch("/api/simulate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ward_id: d.ward_id, origin: origin(), horizon: state.h, rainfall_mm: rVal, avg_temp_c: tVal, humidity_pct: hVal }),
-        });
-        if (!res.ok) return;
-        const sim = await res.json();
-        const simSentence = `<b>[Simulated]</b> About ${fmt(sim.predicted_cases, 1)} cases expected in the week of ${longDate(sim.target_date)} (80% range ${fmt(sim.low, 0)} to ${fmt(sim.high, 0)}).` +
-          (sim.worst_case_tier !== sim.tier ? ` Upper bound: ${sim.worst_case_tier}.` : "");
-        $("#ward-headline").innerHTML = `<span class="chip t-${sim.tier}">${sim.tier}</span> ${simSentence}`;
-        $("#ward-dynamic").innerHTML = renderDriversAndFacts(sim.drivers, sim.facts);
-      } catch (_) {}
-    }, 140);
-  };
-  $("#sim-r").oninput = runSim;
-  $("#sim-t").oninput = runSim;
-  $("#sim-h").oninput = runSim;
-  $("#sim-reset").onclick = () => loadWard(d.ward_id);
-}
-
-/* ---------- ward timeline chart (inline SVG) ---------- */
-function timeline(d) {
-  const W = 420, padL = 34, padR = 12, H1 = 170, H2 = 70, gap = 18;
-  const start = addDays(d.origin, -15 * 7).getTime(), end = addDays(d.origin, 4 * 7).getTime();
-  const x = (isoDate) => padL + ((day(isoDate).getTime() - start) / (end - start)) * (W - padL - padR);
-  const hs = [2, 3, 4].map((h) => ({ h, ...d.horizons[h] }));
-  const yMax = Math.max(4, ...d.history.map((p) => p.cases), ...hs.map((p) => p.high), ...d.realised_after_origin.map((p) => p.cases)) * 1.08;
-  const y = (v) => 8 + (1 - v / yMax) * (H1 - 24);
-  const rMax = Math.max(50, ...d.history.map((p) => p.rain_mm)) * 1.05;
-  const bw = Math.max(3, (W - padL - padR) / 20 - 2);
-  let s = `<svg viewBox="0 0 ${W} ${H1 + gap + H2 + 20}" role="img" aria-label="Weekly cases, forecast, and rainfall for ${esc(d.ward_id)}">`;
-  for (let i = 0; i <= 4; i++) { const v = (yMax / 4) * i; s += `<line x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}" stroke="#e2e9ea"/><text x="${padL - 5}" y="${y(v) + 4}" text-anchor="end">${fmt(v, 0)}</text>`; }
-  const pts = d.history.map((p) => `${x(p.date)},${y(p.cases)}`).join(" ");
-  s += `<polyline points="${pts}" fill="none" stroke="#17262b" stroke-width="2"/>`;
-  s += `<line x1="${x(d.origin)}" x2="${x(d.origin)}" y1="4" y2="${H1 - 14}" stroke="#5a6b70" stroke-dasharray="3 3"/><text x="${x(d.origin) - 4}" y="12" text-anchor="end">forecast made</text>`;
-  hs.forEach((p) => {
-    const cx = x(iso(addDays(d.origin, p.h * 7))), sel = p.h === state.h;
-    s += `<line x1="${cx}" x2="${cx}" y1="${y(p.low)}" y2="${y(p.high)}" stroke="${COLORS[p.tier]}" stroke-width="${sel ? 6 : 4}" stroke-linecap="round" opacity=".55"/>`;
-    s += `<circle cx="${cx}" cy="${y(p.predicted_cases)}" r="${sel ? 6 : 4.5}" fill="${COLORS[p.tier]}" stroke="#17262b" stroke-width="${sel ? 2 : 1}"/>`;
+function bindRange(id, key, fmt) {
+  const el = $(id);
+  el.addEventListener("input", () => {
+    S[key] = +el.value; $(id + "O").textContent = fmt(S[key]); saveControls();
+    later(async () => { await Promise.all([refresh(), key === "surge" ? loadBoard({}) : null]); });
   });
-  d.realised_after_origin.forEach((p) => { const cx = x(p.date), cy = y(p.cases); s += `<path d="M${cx} ${cy - 5}l5 5l-5 5l-5 -5z" fill="#fff" stroke="#17262b" stroke-width="1.5"/>`; });
-  const top = H1 + gap, ry = (v) => top + H2 - (v / rMax) * H2;
-  const wx0 = x(iso(addDays(d.origin, -4 * 7))) - bw / 2 - 1, wx1 = x(d.origin) + bw / 2 + 1;
-  s += `<rect x="${wx0}" y="${top}" width="${wx1 - wx0}" height="${H2}" fill="#dcebf1"/>`;
-  s += `<text x="${padL - 5}" y="${top + 8}" text-anchor="end">${fmt(rMax, 0)}</text><text x="${padL - 5}" y="${top + H2}" text-anchor="end">0</text><text x="${W - padR}" y="${top - 5}" text-anchor="end">rainfall, mm per week</text>`;
-  d.history.forEach((p) => { s += `<rect x="${x(p.date) - bw / 2}" y="${ry(p.rain_mm)}" width="${bw}" height="${top + H2 - ry(p.rain_mm)}" fill="#3d8aa0"/>`; });
-  let last = "";
-  d.history.forEach((p) => { const m = day(p.date).toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" }); if (m !== last) { s += `<text x="${x(p.date)}" y="${top + H2 + 14}" text-anchor="middle">${m}</text>`; last = m; } });
-  return s + "</svg>";
 }
 
-/* ---------- validation view ---------- */
-async function renderValidation() {
-  const el = $("#view-validation");
-  if (!state.val) { el.innerHTML = `<p class="empty">Loading validation results...</p>`; state.val = await api("/api/validation"); }
-  const v = state.val, m = v.metrics, o = m.overall, sp = v.split;
-  const pct = (x) => (x * 100).toFixed(0) + "%";
-  const base = m.baselines;
-  const rows = [["This model (weather lags + ward vulnerability)", o], ["Ward seasonal average (no weather)", base.ward_seasonal_mean], ["Last week's cases carried forward", base.persistence_last_week_cases], ["Same model plus case history (ablation)", base.ablation_plus_case_history_model]];
-  el.innerHTML =
-    `<p class="note">Held-out test: forecasts whose target week falls in 2024 to 2025 (${sp.n_test.toLocaleString()} ward-weeks, all lead times). The model never saw these weeks; 2023 was used only to choose the number of trees, and tier cut points come from the training years.</p>` +
-    `<div class="cards">${[["MAE", fmt(o.mae, 2) + " cases"], ["RMSE", fmt(o.rmse, 2) + " cases"], ["R-squared", fmt(o.r2, 2)], ["Tier correct", pct(o.tier_accuracy)], ["Within one tier", pct(o.tier_within_one)], ["High+ recall", pct(o.high_or_critical_recall)], ["High+ precision", pct(o.high_or_critical_precision)], ["Range coverage (80% target)", pct(o.interval_80_coverage)]]
-      .map(([k, val]) => `<div class="card"><b>${val}</b><span>${k}</span></div>`).join("")}</div>` +
-    `<div class="two"><div class="card"><h2>Compared with simpler approaches</h2><table><tr><th>Approach</th><th class="num">MAE</th><th class="num">RMSE</th></tr>${rows.map(([n, r]) => `<tr><td>${n}</td><td class="num">${fmt(r.mae, 2)}</td><td class="num">${fmt(r.rmse, 2)}</td></tr>`).join("")}</table>` +
-    `<p class="note">Case history adds nothing once weather lags are in, so production uses weather and ward traits only. That keeps the warning independent of delayed hospital reports.</p>` +
-    `<h2 style="margin-top:14px">Accuracy by lead time</h2><table><tr><th>Lead time</th><th class="num">MAE</th><th class="num">RMSE</th><th class="num">Tier correct</th><th class="num">Coverage</th></tr>${Object.entries(m.by_horizon).map(([h, r]) => `<tr><td>${h} weeks</td><td class="num">${fmt(r.mae, 2)}</td><td class="num">${fmt(r.rmse, 2)}</td><td class="num">${pct(r.tier_accuracy)}</td><td class="num">${pct(r.interval_80_coverage)}</td></tr>`).join("")}</table>` +
-    `<p class="note">The range is wider than 80% in practice (${pct(o.interval_80_coverage)} covered): weekly counts are zero-inflated, so the 10th and 90th percentile models are cautious. Treat it as a conservative range.</p></div>` +
-    `<div class="card"><h2>Why lags matter: cases vs. rainfall k weeks earlier (correlation)</h2><div id="lagchart"></div><p class="note">Correlation peaks about three weeks after rain, matching mosquito breeding plus incubation time. Same-week rain is a much weaker signal.</p></div></div>` +
-    `<div class="card"><h2>Predicted vs. actual cases over the test period</h2><div class="controls"><select id="vcity">${Object.keys(m.series["3"]).map((c) => `<option>${esc(c)}</option>`).join("")}</select><select id="vh">${[2, 3, 4].map((h) => `<option value="${h}" ${h === 3 ? "selected" : ""}>${h} weeks ahead</option>`).join("")}</select></div><div id="vchart"></div><p class="note">Weekly totals across the selected wards, each forecast made 2 to 4 weeks before its target week.</p></div>` +
-    `<div class="card"><h2>Risk tier confusion matrix</h2><div class="controls"><select id="cmh">${[2, 3, 4].map((h) => `<option value="${h}" ${h === 3 ? "selected" : ""}>${h} weeks ahead</option>`).join("")}</select></div><div id="cm"></div><p class="note">Rows are the tier that actually occurred, columns the tier predicted. Most errors are one tier off.</p></div>`;
-  drawLag(v.lag_correlations);
-  const draw = () => drawSeries(m.series[$("#vh").value][$("#vcity").value]);
-  $("#vcity").onchange = draw; $("#vh").onchange = draw; draw();
-  const cm = () => { const M = m.confusion[$("#cmh").value], mx = Math.max(...M.flat());
-    $("#cm").innerHTML = `<table class="cm"><tr><th></th>${TIERS.map((t) => `<th>Pred. ${t}</th>`).join("")}</tr>${M.map((r, i) => `<tr><th>Actual ${TIERS[i]}</th>${r.map((c, j) => `<td style="background:rgba(29,90,115,${(c / mx * 0.85).toFixed(2)});color:${c / mx > 0.45 ? "#fff" : "inherit"}">${c.toLocaleString()}</td>`).join("")}</tr>`).join("")}</table>`; };
-  $("#cmh").onchange = cm; cm();
+async function runStress() {
+  const dlg = $("#stress");
+  $("#stressSum").textContent = "Running with all outbound connections blocked..."; $("#stressList").replaceChildren();
+  if (!dlg.open) dlg.showModal();
+  try {
+    const r = await api(`/api/stress-test?scenario=${S.scenario}`);
+    const s = r.stress;
+    $("#stressSum").textContent = `${r.passed ? "PASS" : "FAIL"}: ${r.checks.filter((c) => c.passed).length} of ${r.checks.length} checks in ${r.elapsed_ms} ms. Worst case: surge ${s.surge}x, stock ${s.stock_pct}%, ${s.crews} crews gives ${s.deficit_wards} wards in CRITICAL DEFICIT and ${s.unmet_beds} unmet bed demand.`;
+    $("#stressList").replaceChildren(...r.checks.map((c) => h("li", {}, h("span", { class: c.passed ? "pass" : "fail" }, c.passed ? "PASS" : "FAIL"), h("div", {}, c.check, h("small", {}, c.detail)))));
+  } catch (e) { $("#stressSum").textContent = `Stress test failed to run: ${e.message}`; }
 }
 
-function drawLag(lc) {
-  const ks = Object.keys(lc), vals = ks.map((k) => lc[k]), mx = Math.max(...vals), W = 420, H = 190, pl = 34, bw = (W - pl - 10) / ks.length;
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Correlation by rainfall lag in weeks">`;
-  ks.forEach((k, i) => { const h = (lc[k] / 0.9) * (H - 40), best = lc[k] === mx;
-    s += `<rect x="${pl + i * bw + 4}" y="${H - 24 - h}" width="${bw - 8}" height="${h}" fill="${best ? "#a1233a" : "#3d8aa0"}"/><text x="${pl + i * bw + bw / 2}" y="${H - 8}" text-anchor="middle">${k}</text><text x="${pl + i * bw + bw / 2}" y="${H - 28 - h}" text-anchor="middle">${lc[k].toFixed(2)}</text>`; });
-  $("#lagchart").innerHTML = s + `<text x="${W - 10}" y="12" text-anchor="end">weeks of lag</text></svg>`;
+async function init() {
+  S.status = await api("/api/status");
+  Object.assign(S, DEFAULTS, loadControls());
+  $("#mode").textContent = S.status.mode;
+  $("#mode").title = `Forecast engine: ${S.status.engine.peak === "ml" ? "serialized models loaded" : "precomputed forecasts"}`;
+  $("#lblPeak").textContent = `Peak-season replay (origin ${S.status.scenarios.peak.as_of}, out-of-sample models)`;
+  $("#lblLive").textContent = `Live forecast (origin ${S.status.scenarios.live.as_of})`;
+  $("#city").replaceChildren(...["All", ...S.status.cities].map((c) => h("option", { value: c }, c)));
+  if (!S.status.cities.includes(S.city)) S.city = "All";
+  $("#city").value = S.city;
+  syncControls();
+  $("#city").addEventListener("change", safe(async (e) => { S.city = e.target.value; saveControls(); await refresh(); await loadBoard({}); }));
+  $("#basis").addEventListener("change", safe(async (e) => { S.basis = e.target.value; saveControls(); await reloadAll(); }));
+  $("#colorBy").addEventListener("change", (e) => { S.colorBy = e.target.value; saveControls(); renderHeat(); });
+  document.querySelectorAll("input[name=scenario]").forEach((r) => r.addEventListener("change", safe(async (e) => { S.scenario = e.target.value; saveControls(); syncControls(); await reloadAll(); })));
+  $("#resetBtn").addEventListener("click", safe(async () => { Object.assign(S, DEFAULTS); saveControls(); syncControls(); $("#city").value = "All"; await reloadAll(); }));
+  bindRange("#stock", "stock", (v) => `${v}%`);
+  bindRange("#crews", "crews", (v) => v);
+  bindRange("#surge", "surge", (v) => `${Number(v).toFixed(1)}x`);
+  $("#wardSel").addEventListener("change", (e) => pick(e.target.value));
+  $("#autoBtn").addEventListener("click", safe(async () => { S.asg = {}; await loadBoard({ auto_crews: +$("#auto").value }); (S.sim.deployment || []).forEach((d) => { S.asg[d.ward_id] = d.crews; }); renderBoard(); }));
+  $("#selBtn").addEventListener("click", safe(() => loadBoard({ assignments: Object.fromEntries(Object.entries(S.asg).filter(([, k]) => k > 0)) })));
+  $("#clrBtn").addEventListener("click", safe(async () => { S.asg = {}; await loadBoard({}); }));
+  $("#csvBtn").addEventListener("click", downloadCsv);
+  $("#ovfSel").addEventListener("change", (e) => renderOverflowDispatch(+e.target.value));
+  document.querySelectorAll("#ovfTabs button").forEach((b) => b.addEventListener("click", () => {
+    S.ovfTab = b.dataset.ovftab;
+    document.querySelectorAll("#ovfTabs button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+    ["sms", "wa", "doc"].forEach((t) => { $(`#ovf-pane-${t}`).hidden = t !== S.ovfTab; });
+  }));
+  $("#ovfCopyBtn").addEventListener("click", async () => {
+    const btn = $("#ovfCopyBtn"), text = S.ovfTab === "doc" ? "" : (S.ovfTexts[S.ovfTab] || "");
+    if (S.ovfTab === "doc") { toast("Use Print transfer brief to print or save the transfer directive as PDF."); return; }
+    try { await navigator.clipboard.writeText(text); btn.textContent = "Copied"; } catch (e) { toast("Copy was blocked by the browser. Select the text and copy it manually."); }
+    setTimeout(() => { btn.textContent = "Copy text"; }, 1500);
+  });
+  $("#ovfPrintBtn").addEventListener("click", () => {
+    document.querySelector('#ovfTabs button[data-ovftab="doc"]').click();
+    const w = $("#ovfDocFrame").contentWindow; w.focus(); w.print();
+  });
+  document.querySelectorAll("#dispTabs button").forEach((b) => b.addEventListener("click", () => {
+    S.tab = b.dataset.tab;
+    document.querySelectorAll("#dispTabs button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+    ["sms", "wa", "doc"].forEach((t) => { $(`#pane-${t}`).hidden = t !== S.tab; });
+  }));
+  $("#copyBtn").addEventListener("click", async () => {
+    const btn = $("#copyBtn"), text = S.tab === "doc" ? "" : (S.texts[S.tab] || "");
+    if (S.tab === "doc") { toast("Use Print brief to print or save the commissioner brief as PDF."); return; }
+    try { await navigator.clipboard.writeText(text); btn.textContent = "Copied"; } catch (e) { toast("Copy was blocked by the browser. Select the text and copy it manually."); }
+    setTimeout(() => { btn.textContent = "Copy text"; }, 1500);
+  });
+  $("#printBtn").addEventListener("click", () => {
+    document.querySelector('#dispTabs button[data-tab="doc"]').click();
+    const w = $("#docFrame").contentWindow; w.focus(); w.print();
+  });
+  $("#stressBtn").addEventListener("click", runStress);
+  $("#stressClose").addEventListener("click", () => $("#stress").close());
+  $("#stress").addEventListener("click", (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+  await reloadAll();
+  if (location.hash === "#stress") runStress();
 }
-
-function drawSeries(ser) {
-  const W = 760, H = 240, pl = 40, pr = 10, n = ser.length, mx = Math.max(...ser.map((p) => Math.max(p.actual, p.predicted))) * 1.08;
-  const x = (i) => pl + (i / (n - 1)) * (W - pl - pr), y = (v) => 10 + (1 - v / mx) * (H - 36);
-  const line = (key, col, w) => `<polyline fill="none" stroke="${col}" stroke-width="${w}" points="${ser.map((p, i) => x(i) + "," + y(p[key])).join(" ")}"/>`;
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Predicted versus actual weekly cases">`;
-  for (let i = 0; i <= 4; i++) { const v = (mx / 4) * i; s += `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" stroke="#e2e9ea"/><text x="${pl - 5}" y="${y(v) + 4}" text-anchor="end">${fmt(v, 0)}</text>`; }
-  let last = "";
-  ser.forEach((p, i) => { const m = p.date.slice(0, 7); if (m !== last && (m.endsWith("01") || m.endsWith("07"))) { s += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">${m}</text>`; } last = m; });
-  s += line("actual", "#17262b", 2) + line("predicted", "#e07a3c", 2) +
-    `<text x="${W - pr}" y="12" text-anchor="end" fill="#17262b">dark: actual, orange: predicted</text></svg>`;
-  $("#vchart").innerHTML = s;
-}
-
-/* ---------- boot ---------- */
-(async function init() {
-  try { state.boot = await api("/api/bootstrap"); }
-  catch (e) { document.body.insertAdjacentHTML("afterbegin", `<p style="padding:20px">The API is not reachable. Start the server with <code>python app.py</code>.</p>`); return; }
-  setupControls();
-  await refresh();
-  const top = state.fc.wards[0];
-  if (top) selectWard(top.ward_id);
-})();
+init().catch((e) => { document.body.prepend(h("p", { class: "mode", role: "alert" }, `Engine not reachable: ${e.message}. Start it with: uvicorn app:app --host 127.0.0.1 --port 8000`)); });
